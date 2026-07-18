@@ -19,6 +19,7 @@ import path from 'path';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
+import { externalizeMcpSecrets, scrubSecretAllowedTools, assertNoArgvSecrets, isSecretAllowedToolsEntry } from './shared/argv-secret-guard.js';
 import { buildClaudeUserContent, normalizeImageDescriptors } from './shared/image-attachments.js';
 import { CLAUDE_FALLBACK_MODELS } from './modules/providers/list/claude/claude-models.provider.js';
 import { providerModelsService } from './modules/providers/services/provider-models.service.js';
@@ -199,7 +200,14 @@ function mapCliOptionsToSDK(options = {}) {
     }
   }
 
-  sdkOptions.allowedTools = allowedTools;
+  // SMCP-41: drop any permission entry carrying a secret-shaped literal
+  // (e.g. Bash(PW="…":*)) so it never reaches the CLI's --allowedTools argv,
+  // where it would be visible via ps/proc/<pid>/cmdline.
+  const scrubbedAllowed = scrubSecretAllowedTools(allowedTools);
+  if (scrubbedAllowed.dropped.length > 0) {
+    console.warn(`[SMCP-41] Dropped ${scrubbedAllowed.dropped.length} secret-shaped allowedTools entr${scrubbedAllowed.dropped.length === 1 ? 'y' : 'ies'} before serialization (values withheld from logs).`);
+  }
+  sdkOptions.allowedTools = scrubbedAllowed.kept;
 
   // Use the tools preset to make all default built-in tools available (including AskUserQuestion).
   // This was introduced in SDK 0.1.57. Omitting this preserves existing behavior (all tools available),
@@ -492,7 +500,19 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const mcpServers = await loadMcpConfig(options.cwd);
     if (mcpServers) {
       sdkOptions.mcpServers = mcpServers;
+      // SMCP-41: move literal credential headers (e.g. the per-agent scoped-mcp
+      // bearer token) out of the inline --mcp-config argv and into the
+      // subprocess env, leaving a ${VAR} placeholder the CLI expands at connect
+      // time. Keeps the token off ps/proc/<pid>/cmdline.
+      const { externalized } = externalizeMcpSecrets(sdkOptions.mcpServers, sdkOptions.env);
+      if (externalized.length > 0) {
+        console.log(`[SMCP-41] Externalized ${externalized.length} MCP credential header(s) to the subprocess env (kept out of argv).`);
+      }
     }
+
+    // SMCP-41: fail-open backstop — verify no literal secret survived into the
+    // argv-bound options. Logs loudly on a guard bug; never blocks the launch.
+    assertNoArgvSecrets(sdkOptions);
 
     // Turns with image attachments switch to streaming input so the images
     // ride along as real content blocks. Built per query attempt because an
@@ -584,7 +604,11 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
       if (decision.allow) {
         if (decision.rememberEntry && typeof decision.rememberEntry === 'string') {
-          if (!sdkOptions.allowedTools.includes(decision.rememberEntry)) {
+          // SMCP-41: never persist a secret-shaped permission entry — it would
+          // be re-serialized into --allowedTools argv on the next launch.
+          if (isSecretAllowedToolsEntry(decision.rememberEntry)) {
+            console.warn('[SMCP-41] Refusing to remember a secret-shaped permission entry (would land in --allowedTools argv); approving this call only.');
+          } else if (!sdkOptions.allowedTools.includes(decision.rememberEntry)) {
             sdkOptions.allowedTools.push(decision.rememberEntry);
           }
           if (Array.isArray(sdkOptions.disallowedTools)) {
