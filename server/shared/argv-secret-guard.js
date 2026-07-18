@@ -52,8 +52,12 @@ const PLACEHOLDER = /\$\{[^}]+\}/;
 
 // Credential-shaped `key=value` / `key:value` inside a permission pattern.
 // Value must not begin with `$` (shell/env reference, not a literal secret).
+// Boundaries use lookbehind/lookahead over [A-Za-z0-9] rather than `\b`: `\b`
+// treats `_` as a word character, so `\btoken\b` never matches inside
+// `SCOPED_MCP_BEARER_TOKEN` (no boundary between `_` and `T`) — the exact
+// underscore-prefixed env-var shape this guard exists to catch (SMCP-41 audit).
 const SECRET_KV =
-  /\b(?:pw|pwd|pass(?:wd|word)?|secret|token|api[_-]?key|apikey|bearer|auth|credential|dsn)\b\s*[=:]\s*['"]?(?!\$)[^\s'")]{4,}/i;
+  /(?<![A-Za-z0-9])(?:pw|pwd|pass(?:wd|word)?|secret|token|api[_-]?key|apikey|bearer|auth|credential|dsn)(?![A-Za-z0-9])\s*[=:]\s*['"]?(?!\$)[^\s'")]{4,}/i;
 
 // A long contiguous token wrapped in quotes — a secret value, not a tool name
 // (MCP tool names are long but never quoted).
@@ -62,9 +66,23 @@ const QUOTED_SECRET = /['"][A-Za-z0-9+/=_-]{20,}['"]/;
 // Literal `Bearer <token>` (but not `Bearer ${VAR}`).
 const LITERAL_BEARER = /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/;
 
-// Literal secret assignment surviving into argv (but not `KEY=${VAR}`).
+// Literal secret assignment surviving into argv (but not `KEY=${VAR}`). The
+// keyword may sit anywhere inside the identifier — leading AND trailing
+// identifier chars are allowed — so `API_SECRET_KEY=`, `DB_PASSWORD=`,
+// `SCOPED_MCP_BEARER_TOKEN=` all match, not just bare `TOKEN=`.
+// Value must not begin with `$` — a `$VAR` / `${VAR}` reference is an env
+// indirection, not a literal secret (matches SECRET_KV's `(?!\$)` behavior).
 const LITERAL_ASSIGN =
-  /[A-Za-z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|APIKEY|API_KEY|BEARER|DSN)\s*[=:]\s*(?!\$\{)[^\s"']{8,}/i;
+  /(?:TOKEN|PASSWORD|PASSWD|SECRET|APIKEY|API[_-]?KEY|BEARER|DSN|CREDENTIAL)[A-Za-z0-9_]*\s*[=:]\s*['"]?(?!\$)[^\s"']{6,}/i;
+
+// HTTP Basic-Auth credentials embedded in a URL: `scheme://user:pass@host`.
+// Catches unquoted, non-KV-shaped secrets like `curl https://u:s3cr3t@host`.
+const URL_CREDENTIALS = /:\/\/[^/\s:@]+:[^/\s@]{4,}@/;
+
+// Header names that are credentials by keyword, beyond the exact-match set —
+// so a custom auth header (`x-vault-token`, `x-service-secret`, …) on a future
+// MCP integration doesn't silently regress past the digit-gated fallback.
+const SENSITIVE_HEADER_NAME = /(?:token|secret|key|auth|credential|cookie|password)/i;
 
 /**
  * True if an http-MCP header value carries a literal credential that must not
@@ -76,7 +94,12 @@ const LITERAL_ASSIGN =
 function isSecretHeaderValue(name, value) {
   if (typeof value !== 'string' || value.length === 0) return false;
   if (PLACEHOLDER.test(value)) return false; // already externalized / indirected
-  if (KNOWN_AUTH_HEADERS.has(String(name).toLowerCase())) return true;
+  const lowerName = String(name).toLowerCase();
+  if (KNOWN_AUTH_HEADERS.has(lowerName)) return true;
+  // Keyword-named auth headers are credentials by name — no digit gate, so a
+  // high-entropy but digit-free token in a custom auth header still gets
+  // externalized instead of landing in argv (SMCP-41 audit, MEDIUM).
+  if (SENSITIVE_HEADER_NAME.test(lowerName)) return true;
   const run = value.match(SECRET_RUN);
   return run !== null && HAS_DIGIT.test(run[0]);
 }
@@ -129,7 +152,13 @@ function externalizeMcpSecrets(mcpServers, env, opts = {}) {
  */
 function isSecretAllowedToolsEntry(entry) {
   if (typeof entry !== 'string') return false;
-  return SECRET_KV.test(entry) || QUOTED_SECRET.test(entry) || LITERAL_BEARER.test(entry);
+  return (
+    SECRET_KV.test(entry) ||
+    LITERAL_ASSIGN.test(entry) ||
+    QUOTED_SECRET.test(entry) ||
+    LITERAL_BEARER.test(entry) ||
+    URL_CREDENTIALS.test(entry)
+  );
 }
 
 /**
@@ -164,6 +193,7 @@ function findArgvSecrets(sdkOptions) {
   for (const [where, text] of [['mcpServers', mcpJson], ['allowedTools', toolsCsv]]) {
     if (LITERAL_BEARER.test(text)) findings.push({ where, kind: 'bearer' });
     if (LITERAL_ASSIGN.test(text)) findings.push({ where, kind: 'assignment' });
+    if (URL_CREDENTIALS.test(text)) findings.push({ where, kind: 'url-credentials' });
   }
   return findings;
 }

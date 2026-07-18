@@ -72,6 +72,33 @@ test('isSecretAllowedToolsEntry catches the PW= finding but keeps real tool name
   assert.equal(isSecretAllowedToolsEntry('Bash(export TOKEN=$MYTOKEN:*)'), false);
 });
 
+test('isSecretAllowedToolsEntry catches underscore-prefixed env-var secrets (SMCP-41 audit CRITICAL)', () => {
+  // The `\b` word-boundary bug let these sail past the scrub gate because `_`
+  // is a regex word char. All four must now be flagged.
+  assert.equal(isSecretAllowedToolsEntry(`Bash(DB_PASSWORD=${LIVE_TOKEN}:*)`), true);
+  assert.equal(isSecretAllowedToolsEntry(`Bash(SCOPED_MCP_BEARER_TOKEN=${LIVE_TOKEN}:*)`), true);
+  assert.equal(isSecretAllowedToolsEntry(`Bash(export API_SECRET_KEY=${LIVE_TOKEN} && run)`), true);
+  assert.equal(isSecretAllowedToolsEntry('Bash(MY_DSN=postgres://u:p4ssword@host/db1234:*)'), true);
+  // Lowercase underscore variants too (case-insensitive).
+  assert.equal(isSecretAllowedToolsEntry(`Bash(my_password=${LIVE_TOKEN}:*)`), true);
+  // Still a no-op for the env-reference form.
+  assert.equal(isSecretAllowedToolsEntry('Bash(export SCOPED_MCP_BEARER_TOKEN=${VAR}:*)'), false);
+});
+
+test('isSecretAllowedToolsEntry catches basic-auth credentials embedded in a URL (SMCP-41 audit LOW)', () => {
+  assert.equal(isSecretAllowedToolsEntry('Bash(curl https://user:s3cr3tpass@host/path:*)'), true);
+  // A userinfo-free URL is not a credential.
+  assert.equal(isSecretAllowedToolsEntry('Bash(curl https://host/path:*)'), false);
+});
+
+test('isSecretHeaderValue treats keyword-named auth headers as secret without a digit gate (SMCP-41 audit MEDIUM)', () => {
+  // Custom auth header, high-entropy but digit-free value — must still externalize.
+  assert.equal(isSecretHeaderValue('X-Vault-Token', 'abcdefghijklmnopqrstuvwxyzABCDEF'), true);
+  assert.equal(isSecretHeaderValue('X-Service-Secret', 'someLongOpaqueValueNoDigits'), true);
+  // Non-sensitive header name with a MIME-type value stays a no-op.
+  assert.equal(isSecretHeaderValue('X-Trace-Context', 'application/json'), false);
+});
+
 test('scrubSecretAllowedTools drops secret-shaped entries, keeps the rest', () => {
   const { kept, dropped } = scrubSecretAllowedTools([
     'Read',
