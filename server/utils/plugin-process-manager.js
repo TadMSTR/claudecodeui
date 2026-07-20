@@ -14,6 +14,21 @@ const startingPlugins = new Map();
 // treated as malformed and ignored rather than failing the plugin start.
 const ENV_PERMISSION_RE = /^env:([A-Za-z_][A-Za-z0-9_]*)$/;
 
+// Host-side catalog of env var names that are EVER eligible for plugin passthrough,
+// independent of what any manifest declares. A plugin receives a var only if it BOTH
+// declares `env:<VAR>` in its manifest AND the name appears here. The manifest side
+// scopes a plugin's intent; this host side bounds what that intent can ever reach.
+//
+// Without it, a malicious or supply-chain-compromised manifest (e.g. via the
+// authenticated `POST /:name/update` git-pull path) could request any host secret it
+// knows the name of — the `cloudcli` process env carries CLAUDE_CODE_OAUTH_TOKEN among
+// others — and receive it on the next start. Adding a var here is a deliberate,
+// reviewed host decision; a plugin cannot widen this set on its own.
+export const PLUGIN_ENV_ALLOWLIST = new Set([
+  'TASK_QUEUE_API',
+  'TASK_QUEUE_API_SECRET',
+]);
+
 /**
  * Resolve a plugin's manifest `permissions` array into the list of host env
  * var names it is allowed to receive. Only entries of the exact form
@@ -70,13 +85,27 @@ export function buildPluginEnv(name, permissions = []) {
     }
   }
 
+  const granted = [];
   for (const varName of envPassthroughVars(permissions)) {
+    // Two independent gates: the plugin must declare it (envPassthroughVars) AND the
+    // host must list it as eligible. A name the host does not allow is refused even
+    // when declared and set — surfaced as a warning since it may signal a manifest
+    // reaching for a secret it was never meant to have.
+    if (!PLUGIN_ENV_ALLOWLIST.has(varName)) {
+      console.warn(`[Plugins] "${name}" requested env "${varName}" not on the host passthrough allowlist — refused`);
+      continue;
+    }
     // Never let a declared passthrough clobber a fixed baseline var
     // (e.g. a manifest requesting `env:PLUGIN_NAME`).
     if (varName in env) continue;
     if (process.env[varName] !== undefined) {
       env[varName] = process.env[varName];
+      granted.push(varName);
     }
+  }
+  if (granted.length > 0) {
+    // Names only — never the values. Makes a passthrough grant observable via log review.
+    console.log(`[Plugins] "${name}" granted env passthrough: ${granted.join(', ')}`);
   }
 
   return env;
