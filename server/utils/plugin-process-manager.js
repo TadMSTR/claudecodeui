@@ -9,6 +9,28 @@ const runningPlugins = new Map();
 // Map<pluginName, Promise<port>> — in-flight start operations
 const startingPlugins = new Map();
 
+// A manifest permission requesting a single host env var: "env:VAR_NAME".
+// The var name must be a conventional shell identifier — anything else is
+// treated as malformed and ignored rather than failing the plugin start.
+const ENV_PERMISSION_RE = /^env:([A-Za-z_][A-Za-z0-9_]*)$/;
+
+/**
+ * Resolve a plugin's manifest `permissions` array into the list of host env
+ * var names it is allowed to receive. Only entries of the exact form
+ * `env:<VAR_NAME>` grant a passthrough; non-string, non-matching, or malformed
+ * entries are skipped silently so a bad manifest line never blocks startup.
+ */
+export function envPassthroughVars(permissions) {
+  const vars = [];
+  if (!Array.isArray(permissions)) return vars;
+  for (const perm of permissions) {
+    if (typeof perm !== 'string') continue;
+    const match = perm.match(ENV_PERMISSION_RE);
+    if (match) vars.push(match[1]);
+  }
+  return vars;
+}
+
 /**
  * Build the environment handed to a plugin server subprocess.
  *
@@ -19,8 +41,15 @@ const startingPlugins = new Map();
  * site-packages and fails to import; SystemRoot, PATHEXT and TEMP are needed to
  * resolve system DLLs, executable extensions and a temp directory. None of
  * these carry secrets, so the ones that are set get passed straight through.
+ *
+ * A plugin may opt in to specific additional host vars by declaring
+ * `env:<VAR_NAME>` in its manifest `permissions`. This is an explicit,
+ * per-plugin allowlist — the default stays secret-free, and a var is only
+ * passed through when the plugin declares it AND it is set in the host env.
+ * (e.g. cloudcli-plugin-task-queue declares `env:TASK_QUEUE_API_SECRET` so its
+ * control-API calls can authenticate.)
  */
-function buildPluginEnv(name) {
+export function buildPluginEnv(name, permissions = []) {
   const env = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
@@ -41,6 +70,15 @@ function buildPluginEnv(name) {
     }
   }
 
+  for (const varName of envPassthroughVars(permissions)) {
+    // Never let a declared passthrough clobber a fixed baseline var
+    // (e.g. a manifest requesting `env:PLUGIN_NAME`).
+    if (varName in env) continue;
+    if (process.env[varName] !== undefined) {
+      env[varName] = process.env[varName];
+    }
+  }
+
   return env;
 }
 
@@ -49,7 +87,7 @@ function buildPluginEnv(name) {
  * The plugin's server entry must print a JSON line with { ready: true, port: <number> }
  * to stdout within 10 seconds.
  */
-export function startPluginServer(name, pluginDir, serverEntry) {
+export function startPluginServer(name, pluginDir, serverEntry, permissions = []) {
   if (runningPlugins.has(name)) {
     return Promise.resolve(runningPlugins.get(name).port);
   }
@@ -65,7 +103,7 @@ export function startPluginServer(name, pluginDir, serverEntry) {
 
     const pluginProcess = spawn('node', [serverPath], {
       cwd: pluginDir,
-      env: buildPluginEnv(name),
+      env: buildPluginEnv(name, permissions),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -207,7 +245,7 @@ export async function startEnabledPluginServers() {
     if (!pluginDir) continue;
 
     try {
-      await startPluginServer(plugin.name, pluginDir, plugin.server);
+      await startPluginServer(plugin.name, pluginDir, plugin.server, plugin.permissions);
     } catch (err) {
       console.error(`[Plugins] Failed to start server for "${plugin.name}":`, err.message);
     }

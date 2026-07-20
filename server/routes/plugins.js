@@ -120,7 +120,7 @@ router.put('/:name/enable', async (req, res) => {
         const pluginDir = getPluginDir(plugin.name);
         if (pluginDir) {
           try {
-            await startPluginServer(plugin.name, pluginDir, plugin.server);
+            await startPluginServer(plugin.name, pluginDir, plugin.server, plugin.permissions);
           } catch (err) {
             console.error(`[Plugins] Failed to start server for "${plugin.name}":`, err.message);
           }
@@ -156,7 +156,7 @@ router.post('/install', async (req, res) => {
       const pluginDir = getPluginDir(manifest.name);
       if (pluginDir) {
         try {
-          await startPluginServer(manifest.name, pluginDir, manifest.server);
+          await startPluginServer(manifest.name, pluginDir, manifest.server, manifest.permissions);
         } catch (err) {
           console.error(`[Plugins] Failed to start server for "${manifest.name}":`, err.message);
         }
@@ -190,7 +190,7 @@ router.post('/:name/update', async (req, res) => {
       const pluginDir = getPluginDir(pluginName);
       if (pluginDir) {
         try {
-          await startPluginServer(pluginName, pluginDir, manifest.server);
+          await startPluginServer(pluginName, pluginDir, manifest.server, manifest.permissions);
         } catch (err) {
           console.error(`[Plugins] Failed to restart server for "${pluginName}":`, err.message);
         }
@@ -225,7 +225,7 @@ router.all('/:name/rpc/*', async (req, res) => {
     }
     const pluginDir = path.join(getPluginsDir(), plugin.dirName);
     try {
-      port = await startPluginServer(pluginName, pluginDir, plugin.server);
+      port = await startPluginServer(pluginName, pluginDir, plugin.server, plugin.permissions);
     } catch (err) {
       return res.status(503).json({ error: 'Plugin server failed to start', details: err.message });
     }
