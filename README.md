@@ -19,6 +19,19 @@
 
 ---
 
+## Forge fork
+
+This is forge's fork of `siteboon/claudecodeui` (upstream, remote `origin`), maintained at `TadMSTR/claudecodeui` (remote `fork`). It backs the CloudCLI operator UI on forge.
+
+Forge-specific patches on top of upstream — see `git log origin/main..HEAD` for the current list:
+- Keep MCP bearer tokens and credential literals out of CLI argv (SMCP-41)
+- Permission-gated env passthrough for plugin subprocesses — a plugin subprocess only receives a host env var if its manifest declares `env:<VAR>` and the var is on the host-side `PLUGIN_ENV_ALLOWLIST`
+- Preserve the `cli.js` exec bit after `tsc` regenerates it
+
+Check divergence from upstream (`git fetch origin && git log HEAD..origin/main`) before taking an upstream release.
+
+---
+
 ## Screenshots
 
 <div align="center">
