@@ -19,6 +19,25 @@
 
 ---
 
+## Forge fork
+
+This is forge's fork of `siteboon/claudecodeui` (upstream, remote `origin`), maintained at `TadMSTR/claudecodeui` (remote `fork`). It backs the CloudCLI operator UI on forge.
+
+Re-applied onto upstream `v1.37.0` on 2026-08-01. Two auth patch-sets the fork used to carry (PR #979's `checkCredentials()` OAuth-token check, and PR #980's idle WS/SSE JWT refresh, folded upstream into merged PR #1037) are now covered upstream and have been dropped.
+
+Forge-specific patches on top of upstream — `PATCHES.md` is the authoritative manifest, with a verification probe per patch:
+- **argv-secret-guard** — keep MCP bearer tokens and credential literals out of the spawned CLI's argv, where `/proc/<pid>/cmdline` exposes them to any process running as the same user (SMCP-41)
+- **plugin-env-passthrough** — a plugin subprocess receives a host env var only if its manifest declares `env:<VAR>` *and* the var is on the host-side `PLUGIN_ENV_ALLOWLIST`
+- **cli-exec-bit** — preserve the exec bit on `dist-server/server/modules/cli/cli.js` after `tsc` regenerates it at mode 644
+- **verify-server-aliases** — fail the build when `tsc-alias` leaves unresolved `@/` imports in `dist-server`, instead of crash-looping at startup
+- **test-alias-resolution** — point `tsx` at `server/tsconfig.json` so the server test suite can resolve `@/` and actually run (277 passing vs 27 on pristine upstream)
+
+Before taking an upstream release, run `~/.claude/skills/shared-fork-upstream-sync` rather than `git rebase`: it classifies each patch against its recorded probe. Note that `v1.37.0`'s `server/modules/*` restructure deleted rather than renamed the fork's target files, so a rebase conflicts on every server patch and reports nothing about where the code went.
+
+`PATCHES.md` is fork-only bookkeeping and must never reach a branch pushed to `origin`.
+
+---
+
 ## Screenshots
 
 <div align="center">
