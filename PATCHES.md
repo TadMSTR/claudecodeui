@@ -73,6 +73,19 @@ because they were read semantically rather than by exit code.)
   # Unit coverage:
   tsx --tsconfig server/tsconfig.json --test server/shared/tests/argv-secret-guard.test.js
   ```
+- **audit disposition (2026-08-01, finding M1 — MEDIUM, deferred):** the static chain above
+  is confirmed correct, but the guard's security property also depends on the bundled
+  `claude` CLI expanding `${VAR}` in MCP headers. The original verification was against CLI
+  2.1.212; the SDK is now `^0.3.165` and reports `claudeCodeVersion: 2.1.165` — an *older*
+  bundled CLI despite the higher SDK semver. `bridge.mjs`/`sdk.mjs` are too minified to
+  confirm statically. **Treat SMCP-41 as NOT deploy-verified until the runtime probe above
+  runs against the live service** — unit tests exercise the guard's pure functions, not the
+  CLI's expansion. Tracked in vikunja #307 (id 318).
+- **known nit (audit I2, accepted):** the synthetic constant in the test file is named
+  `LIVE_TOKEN`. The value is synthetic and the file is carried byte-for-byte from the
+  audited `75726bc` remediation, so it was not renamed here. Rename it to `SYNTHETIC_TOKEN`
+  on the next touch — a live bearer token was once copied into a fixture in this repo and
+  force-pushed publicly (vikunja #91 / id 99).
 - **last-verified:** `v1.37.0` on 2026-08-01 (build layer; runtime probe pending deploy)
 
 ## plugin-env-passthrough
