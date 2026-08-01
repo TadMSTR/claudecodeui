@@ -202,9 +202,10 @@ because they were read semantically rather than by exit code.)
 
 ## test-alias-resolution
 
-- **status:** fork-only
+- **status:** pending-PR
 - **commits:** `e17739f7`
-- **upstream-pr:** none yet — **PR candidate, nothing here is forge-specific**
+- **upstream-pr:** [siteboon/claudecodeui#1084](https://github.com/siteboon/claudecodeui/pull/1084)
+  (open)
 - **files:** `package.json` (`test` script)
 - **why:** upstream `v1.37.0` added a real `test` script, but it cannot load most of what
   it targets. `server/tsconfig.json` maps `@/*` → `server/*` with `baseUrl: ".."`, and
@@ -213,7 +214,9 @@ because they were read semantically rather than by exit code.)
   `ERR_MODULE_NOT_FOUND: Cannot find package '@/shared'`, so whole files failed and their
   subtests never ran. Measured on pristine `v1.37.0`: **75 discovered, 27 pass, 48 fail**.
   With `tsx --tsconfig server/tsconfig.json`: **277 discovered, 277 pass**. This is the
-  test-time counterpart of the build-time gap `verify-server-aliases` guards.
+  test-time counterpart of the build-time gap `verify-server-aliases` guards. Re-measured
+  on `origin/main` @ `59472c07` (5 commits past `v1.37.0`) for the upstream PR: **76
+  discovered / 27 pass / 49 fail** before, **253 / 253** after.
 - **why it matters for syncing:** without this, the fork's test suite is permanently red
   and cannot distinguish a real regression from upstream noise — which is the signal every
   other probe in this file leans on.
@@ -277,9 +280,11 @@ because they were read semantically rather than by exit code.)
   `isAuthTokenExpired` is a bare `Date.now() >= claims.expiresAt`, and it now runs inside
   `getStoredAuthToken()` — i.e. on every authenticated read, not just at WS close, making
   the regression more exposed than the original fork bug it fixed.
-- **PR candidate (Step 10 flag):** open an upstream PR restoring a skew tolerance in
-  `isAuthTokenExpired`. This is a real regression versus the fork's prior behaviour, not
-  just a rename to verify. Deliberately excluded from the v1.37.0 port as separate work.
+- **PR candidate (Step 10 flag) — filed:**
+  [siteboon/claudecodeui#1085](https://github.com/siteboon/claudecodeui/pull/1085) (open)
+  restores a `TOKEN_EXPIRY_SKEW_MS` tolerance in `isAuthTokenExpired`. This is a real
+  regression versus the fork's prior behaviour, not just a rename to verify. Deliberately
+  excluded from the v1.37.0 port as separate work.
 - **probe:**
   ```
   git grep -q 'storeAuthToken' <tag> -- src/utils/api.js && \
