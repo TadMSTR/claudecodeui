@@ -147,3 +147,8 @@ tasks/
 cloudcli-sidebar-app-source.tar.gz
 cloudcli-sidebar.html
 electron/*.tar.gz
+
+# Core dumps — the server process holds CLAUDE_CODE_OAUTH_TOKEN and MCP bearer
+# tokens in memory, so a dump committed by accident leaks them wholesale.
+core.*
+*.core
