@@ -5,6 +5,9 @@ type PluginManifest = Record<string, unknown> & {
   dirName?: string;
   enabled?: boolean;
   server?: unknown;
+  // forge fork: manifest-declared `env:<VAR>` entries gating host env passthrough
+  // to the plugin subprocess (see PLUGIN_ENV_ALLOWLIST in plugin-process.service).
+  permissions?: unknown;
 };
 
 type PluginConfig = Record<string, { enabled?: boolean; secrets?: Record<string, unknown> }>;
@@ -21,7 +24,7 @@ type PluginDependencies = {
   install(url: string): Promise<unknown>;
   update(pluginName: string): Promise<unknown>;
   uninstall(pluginName: string): Promise<unknown>;
-  startServer(pluginName: string, pluginDirectory: string, serverConfig: unknown): Promise<number>;
+  startServer(pluginName: string, pluginDirectory: string, serverConfig: unknown, permissions?: unknown): Promise<number>;
   stopServer(pluginName: string): Promise<void>;
   getServerPort(pluginName: string): number | undefined;
   isServerRunning(pluginName: string): boolean;
@@ -59,7 +62,7 @@ export function createPluginsService(dependencies: PluginDependencies) {
     const pluginDirectory = dependencies.getPluginDirectory(plugin.name);
     if (!pluginDirectory) return;
     try {
-      await dependencies.startServer(plugin.name, pluginDirectory, plugin.server);
+      await dependencies.startServer(plugin.name, pluginDirectory, plugin.server, plugin.permissions);
     } catch (error) {
       dependencies.logError(`Failed to start plugin server for ${plugin.name}`, error);
     }
@@ -132,7 +135,7 @@ export function createPluginsService(dependencies: PluginDependencies) {
           dependencies.getPluginsDirectory(),
           plugin.dirName ?? plugin.name,
         );
-        port = await dependencies.startServer(pluginName, pluginDirectory, plugin.server);
+        port = await dependencies.startServer(pluginName, pluginDirectory, plugin.server, plugin.permissions);
       }
       const secrets = dependencies.readConfig()[pluginName]?.secrets ?? {};
       return { port, secrets };
