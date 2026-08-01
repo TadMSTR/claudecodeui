@@ -138,6 +138,14 @@ Last synced against: `v1.37.0` (fork base was `v1.36.1` / merge-base `5884573`).
   `checkCredentials()`, alongside a friendlier auth-status label. Upstream PR #979 landed
   the same check — `claude-auth.provider.ts` is functionally identical to the fork's
   version at `v1.37.0`, including the accompanying test (`claude-auth.test.ts`).
+- **probe:**
+  ```
+  git grep -q 'CLAUDE_CODE_OAUTH_TOKEN' <tag> -- \
+    server/modules/providers/list/claude/claude-auth.provider.ts
+  # Passes (exit 0) against v1.37.0. Fails against the pre-sync base (5884573,
+  # path server/claude-auth.js there) — confirms the probe discriminates rather
+  # than trivially matching.
+  ```
 - **absorbed by:** `v1.37.0`
 - **last-verified:** `v1.37.0` on 2026-08-01
 
@@ -161,5 +169,15 @@ Last synced against: `v1.37.0` (fork base was `v1.36.1` / merge-base `5884573`).
 - **PR candidate (Step 10 flag):** open an upstream PR restoring a skew tolerance in
   `isAuthTokenExpired`. This is a real regression versus the fork's prior behaviour, not
   just a rename to verify.
+- **probe:**
+  ```
+  git grep -q 'storeAuthToken' <tag> -- src/utils/api.js && \
+  git grep -q 'getAuthTokenRefreshDelay' <tag> -- src/utils/api.js && \
+  git grep -q 'expireAuthSession' <tag> -- src/utils/api.js
+  # Asserts the *construct* (exp-derived refresh + session-expiry event), not the
+  # clock-skew tolerance — that regression is tracked separately via the PR-candidate
+  # flag above, not this probe. Passes against v1.37.0, fails against the pre-sync
+  # base (5884573) where none of these three exports existed yet.
+  ```
 - **absorbed by:** `v1.37.0` (partially — see above)
 - **last-verified:** `v1.37.0` on 2026-08-01
