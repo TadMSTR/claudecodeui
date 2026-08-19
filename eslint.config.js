@@ -162,6 +162,7 @@ export default tseslint.config(
             "server/shared/frontmatter.ts",
             "server/shared/claude-cli-path.ts",
             "server/shared/image-attachments.ts",
+            "server/shared/argv-secret-guard.js", // forge fork (SMCP-41): keeps MCP bearer tokens out of the spawned CLI's argv
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },
