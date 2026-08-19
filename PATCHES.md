@@ -106,22 +106,42 @@ Both-direction results as of 2026-08-19 are recorded per entry. Every live probe
   # Unit coverage:
   tsx --tsconfig server/tsconfig.json --test server/shared/tests/argv-secret-guard.test.js
   ```
-- **audit disposition (2026-08-01, finding M1 — MEDIUM, deferred):** the static chain above
-  is confirmed correct, but the guard's security property also depends on the bundled
-  `claude` CLI expanding `${VAR}` in MCP headers. The original verification was against CLI
-  2.1.212; the SDK is `^0.3.165` and reports `claudeCodeVersion: 2.1.165` — an *older*
-  bundled CLI despite the higher SDK semver. `bridge.mjs`/`sdk.mjs` are too minified to
-  confirm statically. **Treat SMCP-41 as NOT deploy-verified until the runtime probe above
-  runs against the live service** — unit tests exercise the guard's pure functions, not the
-  CLI's expansion. Tracked in vikunja #307 (id 318). Still open at this sync.
-- **known nit (audit I2, accepted):** the synthetic constant in the test file is named
-  `LIVE_TOKEN`. The value is synthetic and the file is carried byte-for-byte from the
-  audited `75726bc` remediation, so it has not been renamed. Rename it to
-  `SYNTHETIC_TOKEN` on the next touch of that file — a live bearer token was once copied
-  into a fixture in this repo and force-pushed publicly (vikunja #91 / id 99).
+- **✅ audit disposition (2026-08-01, finding M1 / DH-04 — MEDIUM) — CLOSED 2026-08-19.** The
+  concern was that the guard's security property also depends on the bundled `claude` CLI
+  expanding `${VAR}` in MCP headers, verified only against CLI 2.1.212 while the SDK reports
+  `claudeCodeVersion: 2.1.165` — an *older* bundled CLI despite the higher semver — and
+  `bridge.mjs`/`sdk.mjs` are too minified to confirm statically. **Resolved empirically after
+  the v1.37.2 restart**, against a real cloudcli-spawned `claude` child:
+  - its `--mcp-config` argv carries `Authorization: ${CLOUDCLI_MCP_SECRET_0}` — a
+    placeholder, not a literal, so the guard rewrote it;
+  - `ss -tnp` shows that same pid holding **established** connections to the
+    `scoped-mcp-developer` backend, and it is the only `claude` client of that port;
+  - tool calls over those connections succeed, with no genuine 401/403.
+
+  A CLI that did *not* expand `${VAR}` would send the literal placeholder string as the
+  bearer and be rejected. It was not. **The expansion works at SDK `^0.3.165`.** Re-open this
+  only if the SDK pin moves — that is the trigger, not the passage of time.
+- **✅ vikunja #307 — runtime `/proc` probe RUN, 2026-08-19. SMCP-41 is now DEPLOY-verified**,
+  not merely build-verified. Against pid of the live `claude` child:
+  | Assertion | Result |
+  |---|---|
+  | secret present in `/proc/<pid>/environ` | **true** (required) |
+  | secret present in `/proc/<pid>/cmdline` | **false** (required) |
+  | `${CLOUDCLI_MCP_SECRET_0}` placeholder present in cmdline | **true** (required) |
+
+  The third assertion is the one that matters most and is easy to omit: without it, a guard
+  that simply *dropped* the header would pass the first two and look identical to success.
+  Also swept every long literal in argv and confirmed none matches any value in the process
+  environment — the remaining matches are session UUIDs and filesystem paths. No token value
+  was emitted to any log, commit or ticket at any point (vikunja #91).
+- **known nit (audit I2) — FIXED 2026-08-19** in `9a935292`: the test fixture constant was
+  renamed `LIVE_TOKEN` → `SYNTHETIC_TOKEN` (15 occurrences, value unchanged and confirmed
+  synthetic against the real secrets files with 0 matches). The old name invited exactly the
+  mistake that once put a real bearer token in a fixture in this repo (vikunja #91 / id 99).
 - **last-verified:** `v1.37.2` on 2026-08-19 — static probe discriminates in both
-  directions; unit probe 12/12 pass; env chain re-read by eye at the line numbers above.
-  Runtime `/proc` probe still pending a live service (vikunja #307).
+  directions; unit probe 12/12 pass; env chain re-read by eye at the line numbers above;
+  **runtime `/proc` probe PASSED against the live service after restart**, and the CLI
+  `${VAR}` expansion assumption confirmed rather than assumed.
 
 ## plugin-env-passthrough
 
@@ -166,7 +186,10 @@ Both-direction results as of 2026-08-19 are recorded per entry. Every live probe
   # appears, while a plugin requesting a non-allowlisted var is refused with a warning.
   ```
 - **last-verified:** `v1.37.2` on 2026-08-19 — static probe discriminates in both
-  directions; unit probe 9/9 pass. UI/startup-log signal pending Ted's restart.
+  directions; unit probe 9/9 pass; **startup-log signal confirmed live after restart**:
+  `[Plugins] "task-queue" granted env passthrough: TASK_QUEUE_API, TASK_QUEUE_API_SECRET`,
+  followed by `[Plugins] Server started for "task-queue"`. The passthrough is reaching the
+  subprocess on the real boot path, not just in tests.
 
 ## cli-exec-bit
 
