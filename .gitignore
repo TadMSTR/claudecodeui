@@ -21,6 +21,10 @@ out/
 .env.development.local
 .env.test.local
 .env.production.local
+# The list above only covers the .env.<suffix> shape. Forge's env files are named
+# the other way round (cloudcli.env, task-queue-mcp.env), so a copy dropped in the
+# repo root would have been committable.
+*.env
 
 # IDE and editor files
 .vscode/
