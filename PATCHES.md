@@ -185,11 +185,65 @@ Both-direction results as of 2026-08-19 are recorded per entry. Every live probe
   #   [Plugins] "cloudcli-plugin-task-queue" granted env passthrough: …
   # appears, while a plugin requesting a non-allowlisted var is refused with a warning.
   ```
+- **2026-08-27 (task-queue-plugin-repair-2026-08):** `CLOUDCLI_ORIGIN` added to
+  `PLUGIN_ENV_ALLOWLIST`. It is not a secret — it is a name the host and its plugins must
+  agree on, so that a plugin's WS upgrade allowlist contains the same value the proxy
+  sends (see `plugin-ws-upstream-origin`). Adding a var here is still a reviewed host
+  decision; the two-gate rule is unchanged, and the task-queue manifest declares
+  `env:CLOUDCLI_ORIGIN` alongside it. The existing tests pick the allowlist entry to
+  exercise via `[...PLUGIN_ENV_ALLOWLIST][0]` rather than by literal, so they cover the
+  widened set without edit.
 - **last-verified:** `v1.37.2` on 2026-08-19 — static probe discriminates in both
   directions; unit probe 9/9 pass; **startup-log signal confirmed live after restart**:
   `[Plugins] "task-queue" granted env passthrough: TASK_QUEUE_API, TASK_QUEUE_API_SECRET`,
   followed by `[Plugins] Server started for "task-queue"`. The passthrough is reaching the
-  subprocess on the real boot path, not just in tests.
+  subprocess on the real boot path, not just in tests. Re-verified 2026-08-27 with
+  `CLOUDCLI_ORIGIN` present in the granted list.
+
+## plugin-ws-upstream-origin
+
+- **status:** fork-only
+- **commits:** `71659dd6` (original, task-queue-plugin-repair-2026-08)
+- **upstream-pr:** none
+- **files:** `server/modules/websocket/services/plugin-websocket-proxy.service.ts`,
+  `server/modules/websocket/services/tests/plugin-websocket-proxy.service.test.js`
+- **why:** `handlePluginWsProxy` opens the upstream leg with the `ws` client's defaults,
+  and that client sends **no `Origin` header** unless one is passed explicitly. Any
+  plugin that gates its `/ws` upgrade on `Origin` therefore sees an anonymous handshake
+  from the one client it is meant to trust. The forge task-queue plugin's v0.4.0
+  hardening did exactly that gate and 403'd every proxy connect from 2026-08-02 to
+  2026-08-27 — 2239 `[Plugins] WS proxy error for "task-queue": Unexpected server
+  response: 403` lines — with the tab reading `disconnected` throughout. This patch
+  passes `origin: process.env.CLOUDCLI_ORIGIN || 'http://127.0.0.1:3001'` so the
+  handshake is self-identifying. Paired with `plugin-env-passthrough` carrying
+  `CLOUDCLI_ORIGIN`, both sides read one value and cannot disagree.
+- **note on what the value means:** it names the proxy's own **loopback** leg, not how
+  the operator browses. The browser's `Origin` reaches CloudCLI and stops there; the
+  proxy dials `127.0.0.1:<ephemeral>` on a separate socket. A hostname here would
+  describe a handshake that does not occur.
+- **`||` not `??`:** an empty `CLOUDCLI_ORIGIN` must fall back to the default, not send
+  an empty `Origin` — that would reintroduce the anonymous handshake. Covered by test.
+- **probe:**
+  ```
+  # Static (tag-level) — exits 0 if upstream independently started sending an Origin
+  # on the plugin proxy's upstream leg. Matched by construct, not by our env var name.
+  git grep -qiE "origin: .*(process\.env|['\"]http)" <ref> \
+      -- server/modules/websocket/services/plugin-websocket-proxy.service.ts
+  # 2026-08-27: v1.37.2 -> exit 1 (fork-only), forge-local -> exit 0. Discriminates.
+
+  # Runtime (authoritative) — boots a real upstream WS server and asserts on the Origin
+  # header it actually received, i.e. through the real `new WebSocket(...)` call site:
+  npx tsx --tsconfig server/tsconfig.json --test \
+      server/modules/websocket/services/tests/plugin-websocket-proxy.service.test.js
+  # Plus the real signal, after `pm2 restart cloudcli`:
+  #   grep -c 'WS proxy error for "task-queue"' ~/.pm2/logs/cloudcli-error.log  # stops rising
+  #   grep 'WS proxy connected to "task-queue"' ~/.pm2/logs/cloudcli-out.log | tail -1
+  # and the Task Queue tab's badge reading `live`.
+  ```
+- **last-verified:** `v1.37.2` on 2026-08-27 — static probe discriminates in both
+  directions; runtime probe 5/5 pass; three mutations (revert to anonymous handshake,
+  `??` for `||`, ignore the env override) all caught. Live signal confirmed after
+  restart — see the deploy notes in that build's report.
 
 ## cli-exec-bit
 
