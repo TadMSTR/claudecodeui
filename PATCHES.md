@@ -203,7 +203,7 @@ Both-direction results as of 2026-08-19 are recorded per entry. Every live probe
 ## plugin-ws-upstream-origin
 
 - **status:** fork-only
-- **commits:** `PLACEHOLDER_COMMIT` (original, task-queue-plugin-repair-2026-08)
+- **commits:** `71659dd6` (original, task-queue-plugin-repair-2026-08)
 - **upstream-pr:** none
 - **files:** `server/modules/websocket/services/plugin-websocket-proxy.service.ts`,
   `server/modules/websocket/services/tests/plugin-websocket-proxy.service.test.js`
