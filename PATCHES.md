@@ -32,6 +32,11 @@ two deleted anchors.
 patch** — i.e. a passing probe means the entry can be retired. A failing probe means the
 fork still needs to carry it.
 
+`auth-verify-once-per-mount` adds a third state: **exit 2 = the probe's anchor is gone and
+the probe is broken.** Never read a 2 as "covered". Prefer this shape for any new probe
+that locates a construct by pattern — the failure mode a two-state probe cannot express is
+"upstream renamed the thing I was looking for", and that reads as a false retirement.
+
 **Run every probe in both directions.** A probe that fails against `forge-local` — the
 branch that demonstrably *has* the patch — is broken, not a result, and its "still
 fork-only" verdict is worthless:
@@ -40,8 +45,8 @@ fork-only" verdict is worthless:
 for REF in v1.37.3 forge-local; do echo "== $REF"; <probe>; echo "exit $?"; done
 ```
 
-Both-direction results as of 2026-09-10 are recorded per entry. Every live probe reads
-`1` against `v1.37.3` and `0` against `forge-local`, which is the shape a valid
+Both-direction results as of 2026-09-10 are recorded per entry. All **six** live probes
+read `1` against `v1.37.3` and `0` against `forge-local`, which is the shape a valid
 "still fork-only" verdict has.
 
 ---
@@ -427,6 +432,81 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   runs against the staged tree *before* promotion. The full mid-chain injection layer
   control was not re-run — it mutates a live build directory — and is carried from
   `v1.37.2`, where it passed against a byte-identical `build:server`.
+
+## auth-verify-once-per-mount
+
+- **status:** pending-PR
+- **commits:** `09f62510` (carried onto v1.37.3, 2026-09-10)
+- **upstream-pr:** [siteboon/claudecodeui#1310](https://github.com/siteboon/claudecodeui/pull/1310)
+  — open, unmerged. Resubmission of
+  [#1177](https://github.com/siteboon/claudecodeui/pull/1177), which was **closed unmerged**
+  on 2026-09-07 with *"I think this is not reproducible on latest main."*
+- **files:** `src/modules/auth/context/AuthContext.tsx`,
+  `src/modules/auth/tests/authVerificationReentrancy.test.tsx`
+- **why:** `checkAuthStatus` lists `token` in its dependency array and the mount effect
+  depends on `checkAuthStatus`, so every `X-Refreshed-Token` reissue rebuilds the callback,
+  re-runs the effect and re-verifies the session — three more authenticated requests, which
+  can refresh again. **This is the first fork patch carried for a defect measured on this
+  deployment rather than one found by reading code.**
+
+  | Episode | Cycles | Rate | Version |
+  |---|---|---|---|
+  | 04:54–05:05 | ~5,300 | ~800/min | `v1.37.2` |
+  | 10:31–10:46 | **11,542** | peak 1,167/min, **48 in one second** | `v1.37.3` |
+
+  Both start immediately after a restart and decay without stopping. The earlier episode
+  **predates the v1.37.3 sync**, so the sync did not introduce it.
+- **why the rate matters (this is what identifies the mechanism):** the client's `onclose`
+  path retries on a **fixed 3000ms** timer (`WebSocketContext.tsx:113-116`), capping at
+  0.33 cycles/sec — 11,542 cycles that way would take 9.6 hours, not 15 minutes. The
+  amplifier is **`WebSocketContext.tsx:126`**, where `connect`'s deps are
+  `[dispatch, isAuthLoading, token, user]` and the effect at `:159` depends on `connect`.
+  A `token` *or* `user` identity change reopens the socket **immediately**. The auth loop
+  supplies both every pass — `setToken()` from the refreshed header, and `setUser()` with a
+  freshly parsed object, a new identity each time. Render speed, not timer speed.
+
+  vikunja#417 attributes the storm to event-loop stalls missing the heartbeat. That path
+  exists, but it cannot produce this rate; see the ticket comment of 2026-09-10.
+- **deliberately NOT included:** narrowing `WebSocketContext.tsx:126`'s dependency array.
+  That would address the amplifier as well as the trigger, but it is outside #1310's scope,
+  unreviewed upstream, and removing the trigger is sufficient to stop the storm. Widening
+  the fork's diff beyond the PR it mirrors would also make the retirement below messier.
+- **deploy note:** client-only. Applies with `npm run build:client` plus a browser
+  hard-refresh — **no service restart required**, which is why it could ship without one.
+- **probe:**
+  ```
+  # Exit 0 iff upstream no longer lists `token` in checkAuthStatus's deps.
+  # Anchored on the following mount effect rather than a line number, and FAILS CLOSED:
+  # exit 2 means the anchor is gone and the probe is broken — never read that as covered.
+  git show <ref>:src/modules/auth/context/AuthContext.tsx | python3 -c "
+  import re,sys
+  s=sys.stdin.read()
+  m=re.search(r'\}, \[([^\]]*)\]\);\s*\n(?:\s*//[^\n]*\n)*\s*useEffect\(\(\) => \{\s*\n\s*if \(IS_PLATFORM\)', s)
+  if not m: sys.exit(2)
+  deps=[d.strip() for d in m.group(1).split(',')]
+  sys.exit(1 if 'token' in deps else 0)"
+  # 2026-09-10: v1.37.3 -> 1, origin/main -> 1, forge-local -> 0. Discriminates.
+  # Negative control: anchor deliberately mangled -> exit 2 (BROKEN), not 0. Verified.
+
+  # Runtime (authoritative) — the regression test carried with the patch:
+  npx vitest run src/modules/auth/tests/authVerificationReentrancy.test.tsx
+  # Demonstrated to discriminate, not asserted: 1 request/mount with the fix,
+  # 11 with `token` restored to the dep array (budget-capped so it fails with a
+  # count instead of hanging).
+
+  # Live signal, after a restart — the thing this patch exists for:
+  #   grep -c 'WebSocket connection attempt' ~/.pm2/logs/cloudcli-out.log
+  # must not climb by thousands in the minutes after boot. Quiet baseline is
+  # single-digit connects per minute.
+  ```
+- **retirement:** when #1310 merges, the static probe flips to exit 0 on its own and this
+  entry moves to Retired. Drop the commit at that sync — it will conflict, and it is
+  redundant once upstream carries it.
+- **last-verified:** `v1.37.3` on 2026-09-10 — static probe discriminates in both
+  directions and fails closed on a mangled anchor; runtime test 2/2 pass; full client suite
+  57 files / 398 tests pass with the patch applied. **Live signal not yet confirmed** — it
+  needs the next restart, since the storm only manifests on boot.
+
 
 ---
 
