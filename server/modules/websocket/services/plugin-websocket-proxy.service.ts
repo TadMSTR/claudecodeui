@@ -20,7 +20,19 @@ export function handlePluginWsProxy(
     return;
   }
 
-  const upstream = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  // Send an explicit Origin on the upstream leg. The `ws` client sends NONE by
+  // default, and a plugin that gates its upgrade on Origin therefore sees an
+  // anonymous handshake from the one client it is supposed to trust. The task-queue
+  // plugin's v0.4.0 hardening rejected exactly that shape and 403'd every connect for
+  // three weeks (2239 failures) before anyone traced it to this line.
+  //
+  // This names the proxy's own loopback leg, not how the operator browses: the
+  // browser's Origin reaches CloudCLI, never the plugin, because the proxy opens a
+  // separate socket to 127.0.0.1:<ephemeral>. CLOUDCLI_ORIGIN overrides it so the
+  // host and its plugins can be configured to agree on one value.
+  const upstream = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+    origin: process.env.CLOUDCLI_ORIGIN || 'http://127.0.0.1:3001',
+  });
 
   upstream.on('open', () => {
     console.log(`[Plugins] WS proxy connected to "${pluginName}" on port ${port}`);
