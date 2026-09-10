@@ -21,6 +21,12 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { ElicitationRequest, ElicitationResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 import {
+  externalizeMcpSecrets,
+  scrubSecretAllowedTools,
+  assertNoArgvSecrets,
+  isSecretAllowedToolsEntry
+} from '@/shared/argv-secret-guard.js';
+import {
   appendFilesInputTag,
   buildClaudeUserContent,
   normalizeImageDescriptors
@@ -422,7 +428,14 @@ function mapCliOptionsToSDK(options: AnyRecord = {}) {
     }
   }
 
-  sdkOptions.allowedTools = allowedTools;
+  // SMCP-41: drop any permission entry carrying a secret-shaped literal
+  // (e.g. Bash(PW="…":*)) so it never reaches the CLI's --allowedTools argv,
+  // where it would be visible via ps/proc/<pid>/cmdline.
+  const scrubbedAllowed = scrubSecretAllowedTools(allowedTools);
+  if (scrubbedAllowed.dropped.length > 0) {
+    console.warn(`[SMCP-41] Dropped ${scrubbedAllowed.dropped.length} secret-shaped allowedTools entr${scrubbedAllowed.dropped.length === 1 ? 'y' : 'ies'} before serialization (values withheld from logs).`);
+  }
+  sdkOptions.allowedTools = scrubbedAllowed.kept;
 
   // Use the tools preset to make all default built-in tools available (including AskUserQuestion).
   // This was introduced in SDK 0.1.57. Omitting this preserves existing behavior (all tools available),
@@ -1330,6 +1343,16 @@ async function queryClaudeSDK(
     const mcpServers = await loadMcpConfig(options.cwd);
     if (mcpServers) {
       sdkOptions.mcpServers = mcpServers;
+      // SMCP-41: move literal credential headers (e.g. the per-agent scoped-mcp
+      // bearer token) out of the inline --mcp-config argv and into the
+      // subprocess env, leaving a ${VAR} placeholder the CLI expands at connect
+      // time. Keeps the token off ps/proc/<pid>/cmdline. Writes into the env
+      // object mapCliOptionsToSDK built (buildClaudeSdkEnv), which nothing
+      // reassigns afterwards.
+      const { externalized } = externalizeMcpSecrets(sdkOptions.mcpServers, sdkOptions.env);
+      if (externalized.length > 0) {
+        console.log(`[SMCP-41] Externalized ${externalized.length} MCP credential header(s) to the subprocess env (kept out of argv).`);
+      }
     }
 
     // Makes the CLI echo each message it reads from stdin, at the moment it
@@ -1337,6 +1360,13 @@ async function queryClaudeSDK(
     // whether — Claude actually took it in; the run loop below drops every
     // other echo, so nothing else changes on screen.
     sdkOptions.extraArgs = { ...(sdkOptions.extraArgs || {}), 'replay-user-messages': null };
+
+    // SMCP-41: fail-open backstop — verify no literal secret survived into the
+    // argv-bound options. Logs loudly on a guard bug; never blocks the launch.
+    // Placed after mcpServers, allowedTools and extraArgs are final and before
+    // either createQuery call site, so it covers the hooks-failure retry as
+    // well as the first try.
+    assertNoArgvSecrets(sdkOptions);
 
     // Every turn uses streaming input so stdin stays open past the turn's
     // `result`. The message list is reusable, but each query attempt needs its
@@ -1497,7 +1527,11 @@ async function queryClaudeSDK(
 
       if (decision.allow) {
         if (decision.rememberEntry && typeof decision.rememberEntry === 'string') {
-          if (!sdkOptions.allowedTools.includes(decision.rememberEntry)) {
+          // SMCP-41: never persist a secret-shaped permission entry — it would
+          // be re-serialized into --allowedTools argv on the next launch.
+          if (isSecretAllowedToolsEntry(decision.rememberEntry)) {
+            console.warn('[SMCP-41] Refusing to remember a secret-shaped permission entry (would land in --allowedTools argv); approving this call only.');
+          } else if (!sdkOptions.allowedTools.includes(decision.rememberEntry)) {
             sdkOptions.allowedTools.push(decision.rememberEntry);
           }
           if (Array.isArray(sdkOptions.disallowedTools)) {
