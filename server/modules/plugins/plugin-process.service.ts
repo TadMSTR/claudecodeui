@@ -29,6 +29,10 @@ const ENV_PERMISSION_RE = /^env:([A-Za-z_][A-Za-z0-9_]*)$/;
 export const PLUGIN_ENV_ALLOWLIST = new Set([
   'TASK_QUEUE_API',
   'TASK_QUEUE_API_SECRET',
+  // The Origin this host's plugin WS proxy sends on the upstream leg. A plugin that
+  // gates its /ws upgrade needs the same value the proxy uses, or it rejects the one
+  // client it is meant to trust. Not a secret — a name both sides must agree on.
+  'CLOUDCLI_ORIGIN',
 ]);
 
 /**
