@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -140,4 +141,52 @@ test('assertNoArgvSecrets is fail-open: logs, does not throw', () => {
   assert.ok(findings.length > 0);
   assert.equal(logged.length, 1);
   assert.match(logged[0], /SMCP-41/);
+});
+
+// Synthetic values only, generated per run: never a real credential (vikunja #1112).
+const syntheticHex = (bytes) => crypto.randomBytes(bytes).toString('hex');
+const BCRYPT_ALPHABET = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const syntheticBcrypt = () =>
+  '$2b$12$' + Array.from(crypto.randomBytes(53), (byte) => BCRYPT_ALPHABET[byte % 64]).join('');
+
+test('isSecretAllowedToolsEntry catches a tk_ token behind a single-letter variable (vikunja #1112)', () => {
+  assert.equal(isSecretAllowedToolsEntry(`Bash(T=tk_${syntheticHex(20)}:*)`), true);
+  // The shape alone is enough, with or without an assignment in front of it.
+  assert.equal(isSecretAllowedToolsEntry(`Bash(curl -H "Authorization: tk_${syntheticHex(20)}" https://host:*)`), true);
+});
+
+test('isSecretAllowedToolsEntry catches a bcrypt hash in a *_HASH variable (vikunja #1112)', () => {
+  assert.equal(isSecretAllowedToolsEntry(`Bash(OLD_HASH='${syntheticBcrypt()}':*)`), true);
+  assert.equal(isSecretAllowedToolsEntry(`Bash(H=${syntheticBcrypt()}:*)`), true);
+});
+
+test('isSecretAllowedToolsEntry treats HASH as a credential keyword', () => {
+  assert.equal(isSecretAllowedToolsEntry('Bash(ADMIN_HASH=q9w8e7r6t5:*)'), true);
+});
+
+test('isSecretAllowedToolsEntry catches a long opaque value behind any variable name', () => {
+  assert.equal(isSecretAllowedToolsEntry(`Bash(K=${syntheticHex(16)}:*)`), true);
+  assert.equal(isSecretAllowedToolsEntry('Bash(X="Zm9vYmFyQmF6UXV4MTIzNDU2Nzg5MGFiY2RlZg":*)'), true);
+});
+
+test('the value-shape patterns keep ordinary permission entries', () => {
+  for (const entry of [
+    'Bash(git log:*)',
+    'Bash(npm run test:*)',
+    'mcp__scoped-mcp__task-queue-mcp_submit_task',
+    'mcp__scoped-mcp__githost-mcp_git_status',
+    'Bash(X=1:*)',
+    'Bash(NODE_ENV=production npm run build:*)',
+    'Bash(CONFIG=/home/User/Projects/Some-Long-Directory-Name/config2.json node app.js:*)',
+    'Bash(NAME=my-very-long-kebab-case-project-name-2024:*)',
+    'Bash(export TOKEN=$MYTOKEN:*)',
+  ]) {
+    assert.equal(isSecretAllowedToolsEntry(entry), false, entry);
+  }
+});
+
+test('findArgvSecrets reports a token shape that slipped through', () => {
+  const findings = findArgvSecrets({ allowedTools: ['Read', `Bash(T=tk_${syntheticHex(20)}:*)`] });
+  assert.ok(findings.some((f) => f.kind === 'token-shape'));
+  assert.deepEqual(findArgvSecrets({ allowedTools: ['Read', 'Bash(git log:*)'] }), []);
 });

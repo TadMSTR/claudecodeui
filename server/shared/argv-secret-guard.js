@@ -73,7 +73,21 @@ const LITERAL_BEARER = /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/;
 // Value must not begin with `$` — a `$VAR` / `${VAR}` reference is an env
 // indirection, not a literal secret (matches SECRET_KV's `(?!\$)` behavior).
 const LITERAL_ASSIGN =
-  /(?:TOKEN|PASSWORD|PASSWD|SECRET|APIKEY|API[_-]?KEY|BEARER|DSN|CREDENTIAL)[A-Za-z0-9_]*\s*[=:]\s*['"]?(?!\$)[^\s"']{6,}/i;
+  /(?:TOKEN|PASSWORD|PASSWD|SECRET|APIKEY|API[_-]?KEY|BEARER|DSN|CREDENTIAL|HASH)[A-Za-z0-9_]*\s*[=:]\s*['"]?(?!\$)[^\s"']{6,}/i;
+
+// Value shapes that are secrets whatever the variable is called — the keyword
+// patterns above miss `T=<token>` and a `$`-prefixed hash (vikunja #1112).
+// A Vikunja API token: `tk_` plus a long hex run.
+const VIKUNJA_TOKEN = /(?<![A-Za-z0-9])tk_[0-9a-f]{32,}/i;
+// A bcrypt hash (`$2a$`/`$2b$`/`$2y$` + cost + salt/hash). It starts with `$`,
+// which every keyword pattern reads as an env reference, and `$`/`.` defeat
+// QUOTED_SECRET's charset.
+const BCRYPT_HASH = /\$2[abxy]?\$\d{2}\$[./A-Za-z0-9]{22,}/;
+// Any assignment whose value is a long opaque run: pure hex of 32+, or 32+
+// base64/base64url characters mixing upper case, lower case and digits. A
+// path (leading `/`, `~` or `.`) or a kebab-case name has no such mix.
+const OPAQUE_ASSIGN =
+  /(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*\s*=\s*['"]?(?![/~.])(?:[0-9a-fA-F]{32,}(?![A-Za-z0-9+/_-])|(?=[A-Za-z0-9+/_-]*[0-9])(?=[A-Za-z0-9+/_-]*[a-z])(?=[A-Za-z0-9+/_-]*[A-Z])[A-Za-z0-9+/_-]{32,})/;
 
 // HTTP Basic-Auth credentials embedded in a URL: `scheme://user:pass@host`.
 // Catches unquoted, non-KV-shaped secrets like `curl https://u:s3cr3t@host`.
@@ -157,7 +171,10 @@ function isSecretAllowedToolsEntry(entry) {
     LITERAL_ASSIGN.test(entry) ||
     QUOTED_SECRET.test(entry) ||
     LITERAL_BEARER.test(entry) ||
-    URL_CREDENTIALS.test(entry)
+    URL_CREDENTIALS.test(entry) ||
+    VIKUNJA_TOKEN.test(entry) ||
+    BCRYPT_HASH.test(entry) ||
+    OPAQUE_ASSIGN.test(entry)
   );
 }
 
@@ -194,6 +211,7 @@ function findArgvSecrets(sdkOptions) {
     if (LITERAL_BEARER.test(text)) findings.push({ where, kind: 'bearer' });
     if (LITERAL_ASSIGN.test(text)) findings.push({ where, kind: 'assignment' });
     if (URL_CREDENTIALS.test(text)) findings.push({ where, kind: 'url-credentials' });
+    if (VIKUNJA_TOKEN.test(text) || BCRYPT_HASH.test(text)) findings.push({ where, kind: 'token-shape' });
   }
   return findings;
 }
