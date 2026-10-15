@@ -273,6 +273,20 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   after** the restart, with 13 kept both times, so the new patterns produced no false
   drops. The two original entries were already gone (Ted's preflight cleanup), so this
   checks for false positives; the unit tests cover the two shapes.
+- **more shapes, 2026-10-15, `8db25684` (audit F-02, cloudcli-held-run-race-2026-10):**
+  - `PREFIXED_TOKEN`: `gh[pousr]_`, `github_pat_`, `sk-` (incl. `sk-ant-`/`sk-proj-`),
+    `glpat-` and `xox?-` tokens, wherever they appear and not only in an assignment;
+  - `JWT`: a bare `eyJ….eyJ….…`;
+  - `CRYPT_HASH`: argon2, sha-crypt (`$5$`/`$6$`) and md5-crypt (`$1$`);
+  - an `OPAQUE_ASSIGN` branch for 40+ lower case and digits.
+
+  The backstop reports `token-shape` for all of them. Mutations (all red): each new pattern
+  off, the lowercase branch off, its threshold at 30, the backstop off, and each prefix
+  alternative off. `sk-ant-` was folded into `sk-`, which already covered it. New negatives
+  stay clean: `gh auth status`, `task-scheduler`, `feat/disk-usage-report`,
+  `awk '{print $1$2}'`, `BUILD=release2024`, `scikit-learn`. **SECURITY[accepted] (F-05):**
+  false positives fail closed (one permission prompt). Still missed by design: values of
+  31 or fewer hex characters, and `mysql -p<pw>`.
 - **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
   directions (exit 1 / exit 0) and the unit probe passed 12/12; **lint probe run in both
   directions**, 1 error → 0 errors with the warning count unchanged (table above); env
@@ -641,7 +655,8 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
 
 - **status:** pending-PR
 - **commits:** `bf414b84` (upstream branch `fix/held-run-relay-turn`, cut from `origin/main`
-  `92ccebc6`), `f8fd78a1` (cherry-pick onto `forge-local`, 2026-10-15, clean)
+  `92ccebc6`), `f8fd78a1` (cherry-pick onto `forge-local`, 2026-10-15, clean); audit
+  follow-up `b85642c6` (upstream branch), `ab96b028` (fork, clean pick)
 - **upstream-pr:** [siteboon/claudecodeui#1584](https://github.com/siteboon/claudecodeui/pull/1584),
   opened 2026-10-15 with Ted's approval, from `TadMSTR:fix/held-run-relay-turn`
 - **files:** `server/modules/providers/list/claude/claude-runtime.provider.js`,
@@ -662,6 +677,13 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   - `queryClaudeSDK` awaits `waitForHeldTurn()` before `releaseHeldSession()`: 120 s by
     default (`CLAUDE_HELD_TURN_WAIT_MS`), then `interrupt()` while stdin is still open,
     then `close()` after 10 s.
+  - `releaseHeldSession` interrupts the held process before it stops the tasks and ends
+    stdin (`b85642c6` upstream, `ab96b028` fork; audit F-01). This ends a turn the run has
+    not seen start yet (a Monitor or wake-up turn shows nothing until the first token). It
+    is skipped when the wait has already interrupted or closed the process.
+  - After a close, the new run waits up to 6 s for the old process to exit (audit F-04).
+  - `CLAUDE_HELD_TURN_WAIT_MS` is clamped to [1 s, 2³¹−1 ms]. A value that is not a
+    positive number falls back to the default (audit F-03).
   - `addSession` interrupts before it releases. **This only helps supersedes that skip
     `releaseHeldSession`** (the abort-race path). On the `queryClaudeSDK` path,
     `releaseHeldSession` has already ended stdin, so the SDK still drops the interrupt
@@ -686,6 +708,15 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   **The probe only asks whether *something* is awaited before the release.** If upstream
   ships a different mechanism (for example "deliver, don't respawn"), expect 1 or 2 and
   read the code before retiring.
+- **audit follow-up tests (`b85642c6`):** 3 more runtime tests (unseen turn interrupted
+  before takeover, closed process given time to exit, wait clamp). Mutations, all red: no
+  interrupt in the release; the release always interrupting (a double interrupt after the
+  wait's own); no wait for exit; no clamp; negative values passing through. **Not
+  detectable by the scripted harness:** the interrupt moved after `releaseInput()` inside
+  `releaseHeldSession`, because the fake only notices the release a few microtasks later.
+  The ordering rests on code review. Upstream branch, same worktree, before and after:
+  server 686 → 689 pass (`agent.routes.test.ts` fails at file level in that worktree both
+  times, but passes 10/10 alone), lint 0 errors / 136 warnings, `tsc` the same 1 error.
 - **tests:** 7 runtime tests plus 1 service test. All were red under recorded mutations on
   the upstream branch (9 mutations: relay term dropped from `hasBackgroundWork`; no wait
   before release; flag only on settle; flag only on traffic; `stopped` starts a turn; no
@@ -703,6 +734,8 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
     The client queued it, because the session reads processing during the relay. **The
     server-side wait (`held process is mid-turn`) never ran live.** It is covered only by
     the unit tests.
+- **deploy check pending** for the audit follow-up (`ab96b028`): Queue and Send anyway over
+  a background wait still give 1 process and 0 forks with the release's interrupt in place.
 
 ## running-sessions-single-entry
 
