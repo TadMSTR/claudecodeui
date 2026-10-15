@@ -558,7 +558,8 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
 - **status:** pending-PR
 - **commits:** `d3adf7a7` (upstream branch `feat/background-send-dialog`, cut from
   `origin/main` `92ccebc6`), `7ff426ab` (cherry-pick onto `forge-local`, 2026-10-15)
-- **upstream-pr:** not yet opened (needs Ted's approval: the PR is public)
+- **upstream-pr:** [siteboon/claudecodeui#1583](https://github.com/siteboon/claudecodeui/pull/1583),
+  opened 2026-10-15 with Ted's approval, from `TadMSTR:feat/background-send-dialog`
 - **files:** `src/modules/chat/hooks/useChatComposerState.ts`,
   `src/modules/chat/composer/BackgroundSendDialog.tsx` (new),
   `src/modules/chat/composer/ChatComposer.tsx`, `src/modules/chat/ChatInterface.tsx`,
