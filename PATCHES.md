@@ -637,7 +637,8 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
 - **status:** pending-PR
 - **commits:** `bf414b84` (upstream branch `fix/held-run-relay-turn`, cut from `origin/main`
   `92ccebc6`), `f8fd78a1` (cherry-pick onto `forge-local`, 2026-10-15, clean)
-- **upstream-pr:** not yet opened (Ted approves before it is opened)
+- **upstream-pr:** [siteboon/claudecodeui#1584](https://github.com/siteboon/claudecodeui/pull/1584),
+  opened 2026-10-15 with Ted's approval, from `TadMSTR:fix/held-run-relay-turn`
 - **files:** `server/modules/providers/list/claude/claude-runtime.provider.js`,
   `server/modules/providers/services/provider-runtime.service.ts`, `server/shared/interfaces.ts`,
   docstrings in `scheduled-message-dispatcher.service.ts` and `chat-websocket.service.ts`,
@@ -692,7 +693,8 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
 - **status:** pending-PR
 - **commits:** `c6108253` (upstream branch `fix/running-sessions-single-entry`, cut from
   `origin/main` `92ccebc6`), `666a9851` (cherry-pick onto `forge-local`, 2026-10-15, clean)
-- **upstream-pr:** not yet opened (Ted approves before it is opened)
+- **upstream-pr:** [siteboon/claudecodeui#1585](https://github.com/siteboon/claudecodeui/pull/1585),
+  opened 2026-10-15 with Ted's approval, from `TadMSTR:fix/running-sessions-single-entry`
 - **files:** `server/modules/providers/services/sessions.service.ts`,
   `server/modules/providers/services/claude-cli-liveness.service.ts` (adds `pid` to the live
   entry, for the log line), `server/modules/providers/tests/sessions.service.test.ts`,
