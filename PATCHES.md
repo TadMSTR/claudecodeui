@@ -7,8 +7,33 @@ for the format spec, probe rules, and sync procedure.
 **This file must never reach a branch pushed to `origin` (siteboon/claudecodeui).**
 `forge-local` only.
 
-Last synced against: `v1.37.3` (previous base `v1.37.2` / merge-base `677b7ba4`).
-**Re-applied onto `v1.37.3` on 2026-09-10 — a re-apply, not the rebase `v1.37.2` took.**
+Last synced against: `v1.37.4` (previous base `v1.37.3` / merge-base `70e57859`).
+**Cherry-picked onto `v1.37.4` on 2026-10-15. This was a rebase in effect, done with
+re-apply mechanics.** Upstream changed 361 files / +38305−1690 in 53 commits, so the
+diffstat is again over the skill's ~100-file threshold. The *other* re-apply trigger did
+not fire: every anchor file a carried patch edits is at the same path in `v1.37.4`.
+Upstream did not touch the plugin files, the WS proxy or `.oxlintrc.json` between the two
+tags. The file-count threshold stands in for "git will lose track of where things went",
+and when measured, that had not happened.
+
+`git merge-tree --write-tree v1.37.4 forge-local` (2026-10-15) reported exactly **two**
+content conflicts and no rename surprises:
+
+- `src/modules/auth/context/AuthContext.tsx`: the retired `auth-verify-once-per-mount`
+  (see Retired). The conflict goes away when that commit is dropped.
+- `.gitignore`: upstream appended two test-fixture lines at the same spot as the fork's
+  core-dump block. Both were kept. The fork's `*.env` block merged automatically.
+
+`claude-runtime.provider.js` merged automatically despite heavy upstream change (#1395 and
+others). The eight kept commits were cherry-picked in order onto a branch cut from the
+tag, and `forge-local` was moved to it. The result is what a rebase produces minus the two
+dropped commits (`09f62510`, `bedbcd41`), with each pick open to inspection. **One commit
+message changed.** The commitlint hook now active on this tree rejects the `security:`
+type of `e97c8f19`, so that commit became `fix(security): …` (`0045f570`). Rewording it was
+better than committing with `--no-verify`. **`src/` is byte-identical to `v1.37.4`** now
+that the auth patch is retired.
+
+**History: the `v1.37.3` sync (2026-09-10) was a re-apply, not the rebase `v1.37.2` took.**
 Upstream moved 734 files / +43530−15320, and upstream PR #1206 restructured the client
 from `src/components/**` to `src/modules/**`. Both of the skill's Step 1 re-apply triggers
 fired: the diffstat is far over the ~100-file threshold, and two manifest anchor files were
@@ -32,17 +57,25 @@ two deleted anchors.
 patch** — i.e. a passing probe means the entry can be retired. A failing probe means the
 fork still needs to carry it.
 
+The retired `auth-verify-once-per-mount` added a third state: **exit 2 = the probe's
+anchor is gone and the probe is broken.** Never read a 2 as "covered". Prefer this shape for any new probe
+that locates a construct by pattern — the failure mode a two-state probe cannot express is
+"upstream renamed the thing I was looking for", and that reads as a false retirement.
+
 **Run every probe in both directions.** A probe that fails against `forge-local` — the
 branch that demonstrably *has* the patch — is broken, not a result, and its "still
 fork-only" verdict is worthless:
 
 ```
-for REF in v1.37.3 forge-local; do echo "== $REF"; <probe>; echo "exit $?"; done
+for REF in v1.37.4 forge-local; do echo "== $REF"; <probe>; echo "exit $?"; done
 ```
 
-Both-direction results as of 2026-09-10 are recorded per entry. Every live probe reads
-`1` against `v1.37.3` and `0` against `forge-local`, which is the shape a valid
-"still fork-only" verdict has.
+Both-direction results as of 2026-10-15 are recorded per entry. All **five** live probes
+read `1` against `v1.37.4` and `0` against `forge-local`. A valid "still fork-only"
+verdict has that shape. The sixth probe, `auth-verify-once-per-mount`, read `0` against
+**both** refs, meaning upstream covers it. It was retired only after the runtime test
+passed against upstream's code (see Retired). All four Retired probes still exit `0`
+against `v1.37.4`, so nothing upstream absorbed has regressed.
 
 ---
 
@@ -50,7 +83,8 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
 
 - **status:** fork-only
 - **commits:** `75726bcc` (original), `cef19b6d` (re-apply onto v1.37.0),
-  `7c4676cd` (rebase onto v1.37.2), `6dacd820` (re-apply onto v1.37.3)
+  `7c4676cd` (rebase onto v1.37.2), `6dacd820` (re-apply onto v1.37.3),
+  `9f077e84` (cherry-pick onto v1.37.4)
 - **upstream-pr:** none
 - **files:** `server/shared/argv-secret-guard.js`,
   `server/shared/tests/argv-secret-guard.test.js`,
@@ -70,33 +104,44 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   file; do not trust line numbers across a sync, re-locate by anchor. Current positions
   on `forge-local`, re-measured 2026-09-10:
 
-  | Hunk | v1.37.2 | v1.37.3 |
-  |---|---|---|
-  | guard import (`@/shared/argv-secret-guard.js`) | 23–27 | **23–27** |
-  | `scrubSecretAllowedTools` before `sdkOptions.allowedTools` | 236 | **274** |
-  | `externalizeMcpSecrets(sdkOptions.mcpServers, sdkOptions.env)` | 663 | **794** |
-  | `assertNoArgvSecrets(sdkOptions)` backstop | 673 | **804** |
-  | `isSecretAllowedToolsEntry` on `rememberEntry` | 770 | **908** |
+  | Hunk | v1.37.2 | v1.37.3 | v1.37.4 |
+  |---|---|---|---|
+  | guard import (`@/shared/argv-secret-guard.js`) | 23–27 | 23–27 | **23–27** |
+  | `scrubSecretAllowedTools` before `sdkOptions.allowedTools` | 236 | 274 | **279** |
+  | `externalizeMcpSecrets(sdkOptions.mcpServers, sdkOptions.env)` | 663 | 794 | **1010** |
+  | `assertNoArgvSecrets(sdkOptions)` backstop | 673 | 804 | **1020** |
+  | `isSecretAllowedToolsEntry` on `rememberEntry` | 770 | 908 | **1124** |
+
+  **v1.37.4 (2026-10-15):** auto-merged, no conflict, although upstream changed this file
+  heavily (#1395's held-process / background-task release, #1291, #1394). The five hunks
+  were re-located by anchor; the table above is re-measured, not carried forward.
 
 - **env-chain check (the silent-no-op risk):** `externalizeMcpSecrets` writes into
   `sdkOptions.env`, so the patch is worthless if that object is not what reaches the
   subprocess — it would build green, test green, and do nothing. Re-verified end to end
-  at `v1.37.3`:
-  - `sdkOptions.env` is assigned exactly once, at **L231** (was L198 at `v1.37.2`).
+  at `v1.37.4` (2026-10-15; the `v1.37.3` positions follow in brackets):
+  - `sdkOptions.env` is assigned exactly once, at **L236** [L231 at `v1.37.3`, L198 at `v1.37.2`],
+    still `{ ...process.env, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: … }`.
     Upstream added a key to that object literal
     (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`) — **merge into it, never overwrite it**.
     Upstream's own comment notes `options.env` *replaces* `process.env` as of SDK
-    0.2.113; `package.json` still pins `^0.3.165` at `v1.37.3` — unchanged, so the audit
-    disposition's re-open trigger below has **not** fired.
-  - Nothing reassigns `sdkOptions.env` after L231; L794 only reads it as an argument.
-  - There are still **two `query({ prompt, options: sdkOptions })` call sites** — L926
-    and a hooks-failure retry at L939, both below the L804 backstop.
+    0.2.113; `package.json` still pins `^0.3.165` at `v1.37.4`. That is unchanged, so the
+    audit disposition's re-open trigger below has **not** fired.
+  - Nothing reassigns `sdkOptions.env` after L236. L1010 only reads it as an argument.
+    #1395's `releaseHeldSession` (L388) touches neither `sdkOptions` nor any env.
+  - There are still **two call sites** (L1145, and a hooks-failure retry at L1158), both
+    below the L1020 backstop. **Their shape changed at `v1.37.4`:** they now call
+    `createQuery({ prompt, options: sdkOptions })`, where
+    `const createQuery = context.createQuery ?? query` (L1141). A grep for `query({`
+    finds **nothing**, so re-anchor on `createQuery(` from here on. The only writer of
+    `context.createQuery` is test code (`server/shared/types.ts:645` declares it), and in
+    production it is the SDK's `query`.
     Both pass the *same* `sdkOptions` object, and the
     retry only does `delete sdkOptions.hooks` and rebuilds the prompt stream; it touches
     neither `env` nor `mcpServers`. One `externalizeMcpSecrets` call therefore covers
     both, and the backstop is placed above both rather than beside the first.
   - The one write that lands *after* the backstop runs is the `rememberEntry` push at
-    L911, gated by `isSecretAllowedToolsEntry` at L908. That is precisely why hunk 4
+    L1127, gated by `isSecretAllowedToolsEntry` at L1124 [L911/L908 at `v1.37.3`]. That is precisely why hunk 4
     exists — without it a secret-shaped entry could be
     persisted post-backstop and re-serialized into argv on the next launch.
   **Re-check all four bullets on every sync.**
@@ -129,6 +174,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   git grep -qE 'externaliz(e|ing)McpSecrets|scrubArgvSecret|redactMcpHeader' <ref> -- \
       server/modules/providers/list/claude/claude-runtime.provider.js
   # 2026-09-10: v1.37.3 -> exit 1 (fork-only), forge-local -> exit 0. Discriminates.
+  # 2026-10-15: v1.37.4 -> exit 1, forge-local -> exit 0. Still discriminates.
   # Will need updating to upstream's own naming if/when a PR (ours or theirs) lands.
 
   # Runtime (authoritative) — configure a bearer-token MCP server, spawn a session, and
@@ -174,8 +220,19 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   renamed `LIVE_TOKEN` → `SYNTHETIC_TOKEN` (15 occurrences, value unchanged and confirmed
   synthetic against the real secrets files with 0 matches). The old name invited exactly the
   mistake that once put a real bearer token in a fixture in this repo (vikunja #91 / id 99).
-- **last-verified:** `v1.37.3` on 2026-09-10 — static probe discriminates in both
-  directions (exit 1 / exit 0); unit probe 12/12 pass; **lint probe run in both
+- **last-verified:** `v1.37.4` on 2026-10-15. The static probe discriminates in both
+  directions (exit 1 / exit 0) and the unit probe passes 12/12. **Lint probe, run in both
+  directions:** without the `.oxlintrc.json` entry, `npm run lint` exits 1 with 1 error
+  (`claude-runtime.provider.js:27:8 boundaries(no-unknown)`, unchanged) and 136 warnings.
+  With it, `npm run lint` exits 0 with 0 errors and 136 warnings. The two warning sets are
+  **identical line for line**, compared with `diff`. The total rose from 132 because
+  upstream's backlog grew. The env chain was re-measured at the new lines, including the
+  `createQuery` call-site change. SDK pin unchanged.
+  **Not yet re-run: the runtime `/proc` probe.** It needs Ted's restart, after which the
+  #1109 Phase 3 session runs it. The patch is build-verified at `v1.37.4`; the last
+  deploy-verification was `v1.37.2`.
+- **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
+  directions (exit 1 / exit 0) and the unit probe passed 12/12; **lint probe run in both
   directions**, 1 error → 0 errors with the warning count unchanged (table above); env
   chain re-measured at the new line numbers rather than carried forward; typecheck clean;
   SDK pin unchanged at `^0.3.165`.
@@ -189,7 +246,8 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
 
 - **status:** fork-only
 - **commits:** `4c30a9f9` (original), `f0225ec1` (re-apply onto v1.37.0),
-  `85c78a79` (rebase onto v1.37.2), `94fb745e` (re-apply onto v1.37.3)
+  `85c78a79` (rebase onto v1.37.2), `94fb745e` (re-apply onto v1.37.3),
+  `6c4a956a` (cherry-pick onto v1.37.4)
 - **upstream-pr:** none
 - **files:** `server/modules/plugins/plugin-process.service.ts`,
   `server/modules/plugins/plugins.service.ts`,
@@ -218,6 +276,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   git grep -qiE 'plugin.*env.*allowlist|ALLOWED_PLUGIN_ENV|permissions.*env:' <ref> \
       -- server/modules/plugins/
   # 2026-09-10: v1.37.3 -> exit 1 (fork-only), forge-local -> exit 0. Discriminates.
+  # 2026-10-15: v1.37.4 -> exit 1, forge-local -> exit 0. Still discriminates.
 
   # Runtime (authoritative) — the fork's own coverage for this construct:
   tsx --tsconfig server/tsconfig.json --test \
@@ -235,9 +294,14 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   `env:CLOUDCLI_ORIGIN` alongside it. The existing tests pick the allowlist entry to
   exercise via `[...PLUGIN_ENV_ALLOWLIST][0]` rather than by literal, so they cover the
   widened set without edit.
-- **last-verified:** `v1.37.3` on 2026-09-10 — static probe discriminates in both
-  directions; unit probe 9/9 pass (plus plugin-registry 6/6); `server/modules/plugins/`
-  cherry-picked with zero conflicts, untouched by #1206. **Startup-log signal not re-run
+- **last-verified:** `v1.37.4` on 2026-10-15. The static probe discriminates in both
+  directions, the unit probe passes 9/9 and plugin-registry passes 6/6.
+  `server/modules/plugins/` is **untouched upstream** between `v1.37.3` and `v1.37.4`, so
+  the cherry-pick was clean. **Startup-log signal still pending.** It needs Ted's
+  restart, and #1109 Phase 3 checks it.
+- **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
+  directions, the unit probe passed 9/9 and plugin-registry passed 6/6.
+  `server/modules/plugins/` cherry-picked with zero conflicts and was untouched by #1206. **Startup-log signal not re-run
   at this sync** — it needs a restart, which this build defers to Ted.
   Previously confirmed live at `v1.37.2`:
   `[Plugins] "task-queue" granted env passthrough: TASK_QUEUE_API, TASK_QUEUE_API_SECRET`,
@@ -249,7 +313,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
 
 - **status:** fork-only
 - **commits:** `71659dd6` (original, task-queue-plugin-repair-2026-08),
-  `322dcd29` (re-apply onto v1.37.3)
+  `322dcd29` (re-apply onto v1.37.3), `048d1d91` (cherry-pick onto v1.37.4)
 - **upstream-pr:** none
 - **files:** `server/modules/websocket/services/plugin-websocket-proxy.service.ts`,
   `server/modules/websocket/services/tests/plugin-websocket-proxy.service.test.js`
@@ -276,6 +340,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   git grep -qiE "origin: .*(process\.env|['\"]http)" <ref> \
       -- server/modules/websocket/services/plugin-websocket-proxy.service.ts
   # 2026-09-10: v1.37.3 -> exit 1 (fork-only), forge-local -> exit 0. Discriminates.
+  # 2026-10-15: v1.37.4 -> exit 1, forge-local -> exit 0. Still discriminates.
 
   # Runtime (authoritative) — boots a real upstream WS server and asserts on the Origin
   # header it actually received, i.e. through the real `new WebSocket(...)` call site:
@@ -286,8 +351,12 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   #   grep 'WS proxy connected to "task-queue"' ~/.pm2/logs/cloudcli-out.log | tail -1
   # and the Task Queue tab's badge reading `live`.
   ```
-- **last-verified:** `v1.37.3` on 2026-09-10 — static probe discriminates in both
-  directions; runtime probe 5/5 pass; `server/modules/websocket/` untouched by #1206, so
+- **last-verified:** `v1.37.4` on 2026-10-15. The static probe discriminates in both
+  directions and the runtime probe passes 5/5. The proxy service is **untouched upstream**
+  between `v1.37.3` and `v1.37.4`, so the cherry-pick was clean. **Live signal still
+  pending.** It needs Ted's restart, and #1109 Phase 3 checks it.
+- **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
+  directions, the runtime probe passed 5/5, and `server/modules/websocket/` was untouched by #1206, so
   the patch cherry-picked clean. **Live signal (the 403 count ceasing to rise, the tab
   badge reading `live`) not re-checked** — it needs a restart, deferred to Ted. Mutation
   coverage carried from 2026-08-27; the test file is byte-identical.
@@ -296,7 +365,8 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
 
 - **status:** fork-only
 - **commits:** `ed22b3a1` (original), `52141e2a` (re-apply onto v1.37.0),
-  `fcd4feb3` (rebase onto v1.37.2), `bc9a19f7` (re-apply onto v1.37.3)
+  `fcd4feb3` (rebase onto v1.37.2), `bc9a19f7` (re-apply onto v1.37.3),
+  `fb51b320` (cherry-pick onto v1.37.4)
 - **upstream-pr:** none
 - **files:** `package.json` (`build:server` script)
 - **why:** `tsc` regenerates the built `cli.js` with mode `644` on every build, even
@@ -328,6 +398,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   git show <ref>:package.json | \
     python3 -c "import json,sys; sys.exit(0 if 'chmod' in json.load(sys.stdin)['scripts'].get('build:server','') else 1)"
   # 2026-09-10: v1.37.3 -> exit 1 (fork-only), forge-local -> exit 0. Discriminates.
+  # 2026-10-15: v1.37.4 -> exit 1, forge-local -> exit 0. Still discriminates.
 
   # Runtime (authoritative) — build clean and check the artefact's actual mode, not the
   # script source (the whole point is that source intent and build output diverge).
@@ -337,7 +408,16 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   npm run build >/dev/null && \
     test -x "$(python3 -c "import json;print(json.load(open('package.json'))['bin']['cloudcli'])")"
   ```
-- **last-verified:** `v1.37.3` on 2026-09-10 — runtime probe PASSED. Upstream's
+- **last-verified:** `v1.37.4` on 2026-10-15. **Runtime probe passed.** Upstream's
+  `package.json` scripts are **byte-identical** between `v1.37.3` and `v1.37.4` (empty
+  diff), and so is `bin.cloudcli`. After `npm run build`, the promoted `cli.js` is
+  executable, `dist-server.next` and `dist-server.old` are both gone, and
+  `readlink -f /usr/bin/cloudcli` resolves to that file. No `sudo npm link` was needed.
+  **Mode note:** the build ran under the agent shell's `umask 077`, so the artefact is
+  `-rwx------`, not `-rwxr-xr-x`. The `chmod +x` in `build:server` honours the umask. That
+  is harmless, because `cloudcli` runs as the owning user. Do not read it as a regression
+  of this patch: the exec bit is what the patch guarantees, and it is there.
+- **previously verified:** `v1.37.3` on 2026-09-10. Runtime probe passed. Upstream's
   `build:server`, `prebuild:server`, `postbuild:server` and `bin.cloudcli` are all
   **byte-identical** to `v1.37.2`, so the patch cherry-picked clean. After `npm run build`:
   the promoted `dist-server/server/modules/cli/cli.js` is `-rwxr-xr-x`, `dist-server.next`
@@ -348,7 +428,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
 
 - **status:** fork-only
 - **commits:** `b7a86b71` (original), `50d3d001` (rebase onto v1.37.2),
-  `a36532d0` (re-apply onto v1.37.3)
+  `a36532d0` (re-apply onto v1.37.3), `8f914aa9` (cherry-pick onto v1.37.4)
 - **upstream-pr:** none
 - **files:** `scripts/verify-server-aliases.js`, `package.json` (`build:server`)
 - **why:** `server/tsconfig.json` maps `@/*` → `server/*`, but Node has no package named
@@ -389,6 +469,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   pat=re.compile(r'(verify|check|assert|guard)[-_a-z]*alias|alias[-_a-z]*(verify|check)', re.I)
   sys.exit(0 if any(pat.search(v.replace('tsc-alias','')) for v in s.values()) else 1)"
   # 2026-09-10: v1.37.3 -> exit 1 (fork-only), forge-local -> exit 0. Discriminates.
+  # 2026-10-15: v1.37.4 -> exit 1, forge-local -> exit 0. Still discriminates.
 
   # Runtime (authoritative) — assert no unresolved alias survives a clean build:
   npm run build:server >/dev/null && node scripts/verify-server-aliases.js dist-server
@@ -416,7 +497,14 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   This is the probe rule "assert behaviour, never a symbol or file name" failing in
   production; the replacement above asserts an alias *verification* construct and
   explicitly excludes `tsc-alias`.
-- **last-verified:** `v1.37.3` on 2026-09-10 — runtime probe PASSED; negative control
+- **last-verified:** `v1.37.4` on 2026-10-15. **Runtime probe passed**, and the ordering
+  was read from the build log: `✓ No unresolved "@/" aliases in dist-server.next` prints
+  after `build:server` and before `postbuild:server` / `promote-dist-server.mjs`. So the
+  check still runs against the staged tree before promotion. The build surface
+  (`build:server`, `prebuild:server`, `postbuild:server`) is byte-identical to `v1.37.3`.
+  The script itself is fork-added and unchanged, so the negative, missing-directory and
+  layer controls carry over from `v1.37.3` and were not re-run.
+- **previously verified:** `v1.37.3` on 2026-09-10. Runtime probe passed; negative control
   PASSED (exit 1 for the `from` shape), MISSED for bare/dynamic (see known gap);
   missing-directory control PASSED (exit 1). Both controls were run against a **copy** of
   `dist-server`, not the live one — `cloudcli` is serving from it and an injected bad
@@ -428,9 +516,111 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   control was not re-run — it mutates a live build directory — and is carried from
   `v1.37.2`, where it passed against a byte-identical `build:server`.
 
+
 ---
 
 ## Retired
+
+## auth-verify-once-per-mount
+
+- **status:** superseded (retired at the `v1.37.4` sync, 2026-10-15)
+- **commits:** `09f62510` (carried onto v1.37.3, 2026-09-10). **Dropped at `v1.37.4`.**
+  Its docs commit `bedbcd41` was dropped with it, and this record replaces it.
+- **absorbed by:** `v1.37.4`, via upstream
+  [#1408](https://github.com/siteboon/claudecodeui/pull/1408) `dc7cb6c6`
+  ("stop token refreshes and language changes from remounting the app"), **merged**
+  2026-09-28 (`merged: true` read from the API, not `state`). Upstream's `checkAuthStatus`
+  deps are now `[checkOnboardingStatus, clearSession]`. It reads the stored token at run
+  time and reads `t` through `tRef` (`AuthContext.tsx:192-240` at `v1.37.4`). That is the
+  same fix reached a different way, and it **goes further**: a language change no longer
+  rebuilds the callback either.
+- **retirement proof (2026-10-15). Behaviour was tested, not taken from the static probe:**
+
+  | Check | Ref | Result |
+  |---|---|---|
+  | static probe | `v1.37.4` | exit **0** (covered) |
+  | static probe | `forge-local` (old) | exit 0 |
+  | this patch's regression test, copied onto pristine upstream | `v1.37.4` worktree | **2/2 pass, 1 verify per mount** |
+  | same test, `token` put back into upstream's `checkAuthStatus` deps | `v1.37.4` worktree, mutated | **2/2 fail**, "expected exactly one session verification, got 11" |
+
+  The mutation row matters. It shows the test still discriminates against *upstream's*
+  code rather than passing vacuously, so upstream's fix is not the "superseded but weaker"
+  case (skill Step 10). There is nothing to file upstream.
+- **upstream-pr:** [siteboon/claudecodeui#1310](https://github.com/siteboon/claudecodeui/pull/1310)
+  is open and unmerged, and #1408 supersedes it. Commenting on and closing it is Ted's call
+  (#1109 Phase 4). **History:** #1310 was a resubmission of
+  [#1177](https://github.com/siteboon/claudecodeui/pull/1177), which was **closed unmerged**
+  on 2026-09-07 with *"I think this is not reproducible on latest main."*
+- **files:** `src/modules/auth/context/AuthContext.tsx`,
+  `src/modules/auth/tests/authVerificationReentrancy.test.tsx`
+- **why:** `checkAuthStatus` lists `token` in its dependency array and the mount effect
+  depends on `checkAuthStatus`, so every `X-Refreshed-Token` reissue rebuilds the callback,
+  re-runs the effect and re-verifies the session — three more authenticated requests, which
+  can refresh again. **This is the first fork patch carried for a defect measured on this
+  deployment rather than one found by reading code.**
+
+  | Episode | Cycles | Rate | Version |
+  |---|---|---|---|
+  | 04:54–05:05 | ~5,300 | ~800/min | `v1.37.2` |
+  | 10:31–10:46 | **11,542** | peak 1,167/min, **48 in one second** | `v1.37.3` |
+
+  Both start immediately after a restart and decay without stopping. The earlier episode
+  **predates the v1.37.3 sync**, so the sync did not introduce it.
+- **why the rate matters (this is what identifies the mechanism):** the client's `onclose`
+  path retries on a **fixed 3000ms** timer (`WebSocketContext.tsx:113-116`), capping at
+  0.33 cycles/sec — 11,542 cycles that way would take 9.6 hours, not 15 minutes. The
+  amplifier is **`WebSocketContext.tsx:126`**, where `connect`'s deps are
+  `[dispatch, isAuthLoading, token, user]` and the effect at `:159` depends on `connect`.
+  A `token` *or* `user` identity change reopens the socket **immediately**. The auth loop
+  supplies both every pass — `setToken()` from the refreshed header, and `setUser()` with a
+  freshly parsed object, a new identity each time. Render speed, not timer speed.
+
+  vikunja#417 attributes the storm to event-loop stalls missing the heartbeat. That path
+  exists, but it cannot produce this rate; see the ticket comment of 2026-09-10.
+- **deliberately NOT included:** narrowing `WebSocketContext.tsx:126`'s dependency array.
+  That would address the amplifier as well as the trigger, but it is outside #1310's scope,
+  unreviewed upstream, and removing the trigger is sufficient to stop the storm. Widening
+  the fork's diff beyond the PR it mirrors would also make the retirement below messier.
+- **deploy note:** client-only. Applies with `npm run build:client` plus a browser
+  hard-refresh — **no service restart required**, which is why it could ship without one.
+- **probe:**
+  ```
+  # Exit 0 iff upstream no longer lists `token` in checkAuthStatus's deps.
+  # Anchored on the following mount effect rather than a line number, and FAILS CLOSED:
+  # exit 2 means the anchor is gone and the probe is broken — never read that as covered.
+  git show <ref>:src/modules/auth/context/AuthContext.tsx | python3 -c "
+  import re,sys
+  s=sys.stdin.read()
+  m=re.search(r'\}, \[([^\]]*)\]\);\s*\n(?:\s*//[^\n]*\n)*\s*useEffect\(\(\) => \{\s*\n\s*if \(IS_PLATFORM\)', s)
+  if not m: sys.exit(2)
+  deps=[d.strip() for d in m.group(1).split(',')]
+  sys.exit(1 if 'token' in deps else 0)"
+  # 2026-09-10: v1.37.3 -> 1, origin/main -> 1, forge-local -> 0. Discriminates.
+  # Negative control: anchor deliberately mangled -> exit 2 (BROKEN), not 0. Verified.
+
+  # Runtime (authoritative) — the regression test carried with the patch:
+  npx vitest run src/modules/auth/tests/authVerificationReentrancy.test.tsx
+  # Demonstrated to discriminate, not asserted: 1 request/mount with the fix,
+  # 11 with `token` restored to the dep array (budget-capped so it fails with a
+  # count instead of hanging).
+
+  # Live signal, after a restart — the thing this patch exists for:
+  #   grep -c 'WebSocket connection attempt' ~/.pm2/logs/cloudcli-out.log
+  # must not climb by thousands in the minutes after boot. Quiet baseline is
+  # single-digit connects per minute.
+  ```
+- **retirement clause (as written 2026-09-10):** when #1310 merges, the static probe flips
+  to exit 0 on its own and this entry moves to Retired. **It flipped because of #1408, not
+  #1310.** That is why the runtime test was run before the commit was dropped. Drop the commit at that sync — it will conflict, and it is
+  redundant once upstream carries it.
+- **last-verified (as a live patch):** `v1.37.3` on 2026-09-10. The static probe discriminates in both
+  directions and fails closed on a mangled anchor; runtime test 2/2 pass; full client suite
+  57 files / 398 tests pass with the patch applied. **Live signal not yet confirmed** — it
+  needs the next restart, since the storm only manifests on boot.
+- **live signal (still owed):** after the `v1.37.4` restart, check
+  `grep -c 'WebSocket connection attempt' ~/.pm2/logs/cloudcli-out.log`. It should stay at
+  single digits per minute after boot. This is #1109 Phase 3, and it checks upstream's fix
+  now, not ours.
 
 ## forge-fork-docs-block
 
@@ -456,6 +646,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
 - **consequence:** `PATCHES.md` is now the single manifest, and it is fork-only by
   construction — it exists on no upstream path at all.
 - **probe:** n/a by construction (fork-only documentation).
+- **last-verified:** `v1.37.4` on 2026-10-15. `docs/README.md` is still absent at the tag.
 - **last-verified:** `v1.37.3` on 2026-09-10 — `docs/README.md` confirmed absent at the
   tag; root `README.md` on `forge-local` confirmed **byte-identical to upstream's**, i.e.
   the block was dropped rather than moved.
@@ -504,6 +695,14 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   sync's, which "no fork patch touches it" only argues. Note the discovered-test count
   also varies run to run (446/448/449), so a bare pass count is not a stable signal
   here — read the named failure, not the total.
+- **last-verified:** `v1.37.4` on 2026-10-15. Probe exit 0, still covered, and `test` is
+  unchanged. Full suite on the new `forge-local`: **651 tests, 650 pass, 0 fail, 1 skipped**.
+  The skip is upstream's own: `codex app-server forks a real thread at a turn`, with "the
+  committed Codex rollout fixture is not available". The `agent.routes` flake (#306) did
+  not fire in this run. That is not evidence it is fixed; it fired 2 in 4 last time. Client
+  suite (`npm run test:client`): **106 files, 730 tests, all pass**. Upstream's new
+  `claude-runtime-hold.test.ts` (#1395) passes 6/6 when run alone, and its subtests appear
+  in the full-suite log.
 - **last-verified:** `v1.37.3` on 2026-09-10 — still covered upstream; `test` is
   unchanged from `v1.37.2`. Full suite on the re-applied fork: **448 discovered /
   447 pass / 1 skipped**, the only failure being the known flake below.
@@ -523,6 +722,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
     server/modules/providers/list/claude/claude-auth.provider.ts
   ```
 - **absorbed by:** `v1.37.0`
+- **last-verified:** `v1.37.4` on 2026-10-15. Probe exit 0, still covered upstream.
 - **last-verified:** `v1.37.3` on 2026-09-10 — still covered upstream (probe exits 0;
   `claude-auth.provider.ts` did not move at #1206); no fork exposure.
 
@@ -570,6 +770,7 @@ Both-direction results as of 2026-09-10 are recorded per entry. Every live probe
   git grep -q 'TOKEN_EXPIRY_SKEW_MS' <ref> -- src/shared/authToken.ts
   ```
 - **absorbed by:** `v1.37.0` (construct) and `v1.37.2` (clock-skew tolerance, PR #1085)
+- **last-verified:** `v1.37.4` on 2026-10-15. Both probes (construct and `TOKEN_EXPIRY_SKEW_MS`) exit 0, still covered.
 - **last-verified:** `v1.37.3` on 2026-09-10 — both probes exit 0 against `v1.37.3` at
   the repathed location; all four symbols confirmed present in `src/shared/authToken.ts`.
   The skew probe exits 1 against `v1.37.0`, confirming it still discriminates.
