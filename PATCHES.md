@@ -662,7 +662,11 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   - `queryClaudeSDK` awaits `waitForHeldTurn()` before `releaseHeldSession()`: 120 s by
     default (`CLAUDE_HELD_TURN_WAIT_MS`), then `interrupt()` while stdin is still open,
     then `close()` after 10 s.
-  - `addSession` interrupts before it releases.
+  - `addSession` interrupts before it releases. **This only helps supersedes that skip
+    `releaseHeldSession`** (the abort-race path). On the `queryClaudeSDK` path,
+    `releaseHeldSession` has already ended stdin, so the SDK still drops the interrupt
+    (audit F-01, 2026-10-15). The new-run protection comes from `waitForHeldTurn`, not
+    from this reorder.
   - "Deliver, don't respawn" was not done (#1108 option a).
 - **probe:** three-state:
   ```
