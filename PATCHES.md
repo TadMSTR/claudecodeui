@@ -691,7 +691,14 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   - lint 0 errors, 136 warnings (both);
   - client 748 (both);
   - `tsc` the same 1 error.
-- **deploy check pending** (#1115 Phase 4): a deterministic relay race, queued and direct.
+- **deployed and accepted 2026-10-15** (restart 15:11:19, #1115 Phase 4). The relay turn was
+  forced to about 56 s (four sequential `sleep 12` calls) against the 30 s dispatcher poll:
+  - Queue (3 runs): delivered 5–27 s after the relay's `result`. At most 1 claude process
+    per 2 s sample, 0 transcript forks.
+  - Direct send during the relay (1 run): delivered after the `result`, 1 process, 0 forks.
+    The client queued it, because the session reads processing during the relay. **The
+    server-side wait (`held process is mid-turn`) never ran live.** It is covered only by
+    the unit tests.
 
 ## running-sessions-single-entry
 
@@ -738,7 +745,12 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   - lint 0 errors, 136 warnings;
   - client 749 (main 748);
   - `tsc` the same 1 error.
-- **deploy check pending** (#1115 Phase 4 step 4).
+- **deployed and accepted 2026-10-15** (#1115 Phase 4 step 4). Exactly one entry per
+  session in about 600 samples: `background: true` during waits, processing during relay
+  turns (`tasks` is 0 there except while a foreground tool runs). **Exception, #1117
+  (id 1200):** a process spawned by Send anyway reads registry `busy` for its whole next
+  wait (2 of 2), so the session lists as processing and the `console.warn` fires on every
+  poll. This fails safe (the client queues). The cause is not yet known.
 
 ---
 
