@@ -822,6 +822,9 @@ export type ProviderRuntimeContext = {
   createQuery?: (input: { prompt: AsyncIterable<unknown>; options: AnyRecord }) => AsyncIterable<unknown> & {
     interrupt(): Promise<unknown>;
     stopTask?(taskId: string): Promise<void>;
+    // Forge fork (held-run-relay-turn): ends a held process whose turn ignored
+    // its interrupt. The SDK's `Query.close()` is the real implementation.
+    close?(): void;
   };
 };
 

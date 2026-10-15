@@ -86,7 +86,11 @@ export type ProviderRuntimeGateway = SideQuestionRuntime & {
   stopBackgroundTask(provider: LLMProvider, sessionId: string, taskId: string): Promise<boolean>;
   /** Delivers a message into the session's running turn; false when no turn can take it. */
   steer(provider: LLMProvider, sessionId: string, command: string, options: AnyRecord): Promise<boolean>;
-  /** Whether a provider runtime still holds background work for the session after its turn ended. */
+  /**
+   * Whether a provider runtime still holds background work for the session
+   * after its turn ended, including the turn in which the held process relays
+   * that work's result.
+   */
   hasBackgroundWork(sessionId: string): boolean;
   resolveToolApproval(requestId: string, payload: ProviderPermissionDecision): void;
   getPendingApprovalsForSession(sessionId: string): unknown[];
