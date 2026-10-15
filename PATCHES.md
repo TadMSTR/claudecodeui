@@ -287,6 +287,8 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   `awk '{print $1$2}'`, `BUILD=release2024`, `scikit-learn`. **SECURITY[accepted] (F-05):**
   false positives fail closed (one permission prompt). Still missed by design: values of
   31 or fewer hex characters, and `mysql -p<pw>`.
+  **Deploy-checked 2026-10-15** (restart 16:29:33): live argv had 13 entries, 0 flagged,
+  0 backstop findings, and the boot drop count was unchanged at 1 (no false drops).
 - **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
   directions (exit 1 / exit 0) and the unit probe passed 12/12; **lint probe run in both
   directions**, 1 error → 0 errors with the warning count unchanged (table above); env
@@ -734,8 +736,13 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
     The client queued it, because the session reads processing during the relay. **The
     server-side wait (`held process is mid-turn`) never ran live.** It is covered only by
     the unit tests.
-- **deploy check pending** for the audit follow-up (`ab96b028`): Queue and Send anyway over
-  a background wait still give 1 process and 0 forks with the release's interrupt in place.
+- **audit follow-up deployed and checked 2026-10-15** (restart 16:29:33, build `8f2d73d9`):
+  - Queue with a forced 60 s relay: delivered after the relay, at most 1 process, 0 forks.
+  - Send anyway over a wait: the sleep is killed, 1 process, 0 forks.
+  - The release's own interrupt logged no error. The existing `Error interrupting
+    superseded run … Query closed before response received` line still appears at every
+    takeover. It is the moot `addSession` interrupt (F-01) and predates this fix (12 times
+    today, including 15:38 and 15:47).
 
 ## running-sessions-single-entry
 
