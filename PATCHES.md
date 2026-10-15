@@ -615,9 +615,14 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   clean `origin/main` in the same `/tmp` worktree. `tsc` has 1 error
   (`recentConversationTitleSync.test.ts`), which is on `origin/main` too. `forge-local`:
   client **737/737**.
-- **acceptance (pending restart):** #1114 Phase 3. Accidental Enter sends nothing. Queue: the
-  sleep exits 0 and the message is delivered after it. Send anyway behaves as before. A
-  35-minute silent wait is measured against the 30-minute silence ceiling (upstream #1535).
+- **deployed and accepted 2026-10-15** (restart 12:39:11, #1114 Phase 3):
+  - Accidental Enter: cancels, nothing sent.
+  - Queue (300 s / 240 s / 2100 s): every sleep exited 0, and the message was delivered 5–20 s after.
+  - Send anyway: the work is stopped, as before.
+  - Two silent 35-minute waits survived the 30-minute silence ceiling.
+  - Found during acceptance, server-side and not part of this patch: #1115 (relay-turn race: a
+    queued message can start a second process while the held one is still relaying) and #1116
+    (a duplicate running-sessions entry can hide `background`, which skipped the dialog once).
 
 ---
 
