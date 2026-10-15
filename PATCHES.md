@@ -248,18 +248,26 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
 
   MCP tool calls succeeded over the placeholder after the restart, so the CLI still
   expands `${VAR}` at SDK `^0.3.165`. No value was printed.
-- **⚠ known gap (vikunja #1112 / id 1195), found at the `v1.37.4` deploy check:** the
-  **allowedTools** half of the guard misses two shapes. On boot it logged
-  `Dropped 7 secret-shaped allowedTools entries`. Evaluating `isSecretAllowedToolsEntry`
-  against the 230 live `--allowedTools` entries (redacted, lengths only) found two
-  secret-shaped entries that pass:
-  - `Bash(T=<tk_ + hex>:*)`: a single-letter variable, so no keyword pattern applies.
-  - `Bash(OLD_HASH='<bcrypt>':*)`: `HASH` is not a keyword, and bcrypt's `$`/`.` defeat
+- **known gap CLOSED in code (vikunja #1112 / id 1195), 2026-10-15, `a5e18dfb`:** at the
+  `v1.37.4` deploy check, the **allowedTools** half missed two shapes:
+  - `Bash(T=<tk_ + hex>:*)`: a single-letter variable, so no keyword pattern applied.
+  - `Bash(OLD_HASH='<bcrypt>':*)`: `HASH` was not a keyword, and bcrypt's `$`/`.` defeat
     `QUOTED_SECRET`.
 
-  Both were already in argv under `v1.37.3`, so the sync did not cause this. The fix is
-  value-shape detection that does not depend on the variable name, tracked separately.
-  The MCP-bearer property above is unaffected.
+  Neither was a regression from the sync. Ted removed both live entries at the
+  2026-10-15 preflight. Detection now works by value shape, whatever the variable name:
+  - `VIKUNJA_TOKEN` (`tk_` + 32+ hex);
+  - `BCRYPT_HASH` (`$2[abxy]$NN$…`);
+  - `OPAQUE_ASSIGN` (any `NAME=` followed by 32+ hex, or 32+ base64 mixing upper case,
+    lower case and digits, excluding values that start with `/`, `~` or `.`).
+
+  `HASH` also joined the `LITERAL_ASSIGN` keywords. The `findArgvSecrets` backstop reports
+  `token-shape` for the first two. Tests use synthetic values generated per run. The
+  negatives `Bash(git log:*)`, `Bash(npm run test:*)`, `mcp__*`, `Bash(X=1:*)`, a mixed-case
+  path and a kebab-case name with digits all still pass. Every new pattern was seen red under
+  a recorded mutation (7 mutations: each pattern off, the path exclusion off, the upper-case
+  gate off, the backstop off). **Deploy check pending:** after the restart, re-run the
+  redacted live-argv check (counts and lengths only).
 - **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
   directions (exit 1 / exit 0) and the unit probe passed 12/12; **lint probe run in both
   directions**, 1 error → 0 errors with the warning count unchanged (table above); env
@@ -623,6 +631,107 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   - Found during acceptance, server-side and not part of this patch: #1115 (relay-turn race: a
     queued message can start a second process while the held one is still relaying) and #1116
     (a duplicate running-sessions entry can hide `background`, which skipped the dialog once).
+
+## held-run-relay-turn
+
+- **status:** pending-PR
+- **commits:** `bf414b84` (upstream branch `fix/held-run-relay-turn`, cut from `origin/main`
+  `92ccebc6`), `f8fd78a1` (cherry-pick onto `forge-local`, 2026-10-15, clean)
+- **upstream-pr:** not yet opened (Ted approves before it is opened)
+- **files:** `server/modules/providers/list/claude/claude-runtime.provider.js`,
+  `server/modules/providers/services/provider-runtime.service.ts`, `server/shared/interfaces.ts`,
+  docstrings in `scheduled-message-dispatcher.service.ts` and `chat-websocket.service.ts`,
+  tests in `claude-runtime-hold.test.ts` and `provider-runtime.service.test.ts`
+- **why:** vikunja #1115 (id 1198), found during #1114's acceptance. A held process releases
+  on the `result` of the turn that relays its last task, but between the settle and that
+  `result` neither `isProcessing` nor `hasBackgroundWork` was true. A queued message (the
+  dispatcher polls every 30 s) or a direct send started a second process. Closing stdin did
+  not stop the relay turn, and two processes ran tool calls in one session. The supersede
+  `interrupt()` was dropped because it was queued after `releaseInput()`.
+- **fix:**
+  - Per-session `heldTurns`: set at a non-`stopped` settle, or at main-thread traffic while
+    held. Cleared at `result` or process exit.
+  - `hasActiveHeldTurn` is ORed into `providerRuntimeService.hasBackgroundWork`, which
+    covers the dispatcher, the retention guard and the subscribe attach.
+  - `queryClaudeSDK` awaits `waitForHeldTurn()` before `releaseHeldSession()`: 120 s by
+    default (`CLAUDE_HELD_TURN_WAIT_MS`), then `interrupt()` while stdin is still open,
+    then `close()` after 10 s.
+  - `addSession` interrupts before it releases.
+  - "Deliver, don't respawn" was not done (#1108 option a).
+- **probe:** three-state:
+  ```
+  f=server/modules/providers/list/claude/claude-runtime.provider.js
+  git show <ref>:$f 2>/dev/null | python3 -c "
+  import re,sys
+  s=sys.stdin.read()
+  i=s.find('async function queryClaudeSDK(')
+  j=s.find('releaseHeldSession(sessionKey())', i) if i>=0 else -1
+  if not s or i<0 or j<0: sys.exit(2)      # anchor gone: probe broken, NOT covered
+  pre=s[max(i,j-600):j]
+  sys.exit(0 if re.search(r'\\bawait\\b', pre) else 1)"
+  ```
+  2026-10-15: `v1.37.4` → **1**, `origin/main` → **1**, `forge-local` before (`4e428942`) →
+  **1**, the upstream branch → **0**, `forge-local` after → **0**. Negative controls on the
+  patched file: the `await waitForHeldTurn` line removed → **1**; the call renamed → **2**.
+  **The probe only asks whether *something* is awaited before the release.** If upstream
+  ships a different mechanism (for example "deliver, don't respawn"), expect 1 or 2 and
+  read the code before retiring.
+- **tests:** 7 runtime tests plus 1 service test. All were red under recorded mutations on
+  the upstream branch (9 mutations: relay term dropped from `hasBackgroundWork`; no wait
+  before release; flag only on settle; flag only on traffic; `stopped` starts a turn; no
+  interrupt on timeout; no `close()`; no clear on exit; no clear on `result`). The upstream
+  branch against clean `origin/main`:
+  - server 690 / 3 / 1 vs 682 / 3 / 1;
+  - lint 0 errors, 136 warnings (both);
+  - client 748 (both);
+  - `tsc` the same 1 error.
+- **deploy check pending** (#1115 Phase 4): a deterministic relay race, queued and direct.
+
+## running-sessions-single-entry
+
+- **status:** pending-PR
+- **commits:** `c6108253` (upstream branch `fix/running-sessions-single-entry`, cut from
+  `origin/main` `92ccebc6`), `666a9851` (cherry-pick onto `forge-local`, 2026-10-15, clean)
+- **upstream-pr:** not yet opened (Ted approves before it is opened)
+- **files:** `server/modules/providers/services/sessions.service.ts`,
+  `server/modules/providers/services/claude-cli-liveness.service.ts` (adds `pid` to the live
+  entry, for the log line), `server/modules/providers/tests/sessions.service.test.ts`,
+  `src/shared/tests/backgroundSessionActivity.test.tsx`
+- **why:** vikunja #1116 (id 1199). Background-only entries were not recorded in
+  `runningById`, so a `busy` CLI registry added a second entry without `background` or
+  `tasks`. The client keeps the last entry, so the outcome depended on order.
+- **fix:**
+  - Record background entries in `runningById`.
+  - A `busy` CLI upgrades the background entry in place to **processing, with tasks**
+    (the reverse of the ticket's suggestion: background during a live turn would offer
+    Send anyway).
+  - A CLI that is not busy leaves the entry as background.
+  - `console.warn` with the session id, pid and task count when the upgrade fires.
+  - Independent of `held-run-relay-turn`. Once both are upstream, the relay predicate could
+    feed the same upgrade.
+- **probe:** three-state:
+  ```
+  f=server/modules/providers/services/sessions.service.ts
+  git show <ref>:$f 2>/dev/null | python3 -c "
+  import sys
+  s=sys.stdin.read()
+  i=s.find('async listRunningSessions(')
+  a=s.find('listBackgroundWork', i) if i>=0 else -1
+  b=s.find('listBusyClaudeCliSessions()', a) if a>=0 else -1
+  if not s or i<0 or a<0 or b<0: sys.exit(2)
+  sys.exit(0 if 'runningById.set(' in s[a:b] else 1)"
+  ```
+  2026-10-15: `v1.37.4` → **1**, `origin/main` → **1**, `forge-local` before → **1**, the
+  upstream branch → **0**, `forge-local` after → **0**. Negative controls: the
+  `runningById.set` line removed → **1**; `listBusyClaudeCliSessions()` renamed → **2**.
+- **tests:** 2 server tests and 1 client test. All were red under 4 recorded mutations (not
+  registered; `background` kept on busy; `tasks` dropped on busy; client treats a `tasks`
+  entry as background). The upstream branch:
+  - server 684 / 3 / 1;
+  - lint 0 errors, 136 warnings;
+  - client 749 (main 748);
+  - `tsc` the same 1 error.
+- **deploy check pending** (#1115 Phase 4 step 4).
 
 ---
 
