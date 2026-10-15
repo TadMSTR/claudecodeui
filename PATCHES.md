@@ -33,6 +33,11 @@ type of `e97c8f19`, so that commit became `fix(security): …` (`0045f570`). Rew
 better than committing with `--no-verify`. **`src/` is byte-identical to `v1.37.4`** now
 that the auth patch is retired.
 
+**Deployed 2026-10-15 at 11:25** through `pm2-rehome-window.sh`, which also re-homed the
+PM2 daemon under `pm2-ted.service` (#1111). Upstream's DB migration added
+`provider_models.effort_values` / `effort_default` cleanly. Deploy probes are recorded per
+entry. This closes the deploy debt #777 carried from `v1.37.3`.
+
 **History: the `v1.37.3` sync (2026-09-10) was a re-apply, not the rebase `v1.37.2` took.**
 Upstream moved 734 files / +43530−15320, and upstream PR #1206 restructured the client
 from `src/components/**` to `src/modules/**`. Both of the skill's Step 1 re-apply triggers
@@ -228,9 +233,31 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   **identical line for line**, compared with `diff`. The total rose from 132 because
   upstream's backlog grew. The env chain was re-measured at the new lines, including the
   `createQuery` call-site change. SDK pin unchanged.
-  **Not yet re-run: the runtime `/proc` probe.** It needs Ted's restart, after which the
-  #1109 Phase 3 session runs it. The patch is build-verified at `v1.37.4`; the last
-  deploy-verification was `v1.37.2`.
+  **Deploy-verified at `v1.37.4` on 2026-10-15** (after the 11:25 restart). The runtime
+  `/proc` probe was run against a live cloudcli-spawned `claude` (its parent is the new
+  cloudcli pid):
+
+  | Assertion | Result |
+  |---|---|
+  | `CLOUDCLI_MCP_SECRET_0` value present in `/proc/<pid>/environ` | **true** (required) |
+  | value present in `/proc/<pid>/cmdline` | **false** (required) |
+  | `${CLOUDCLI_MCP_SECRET_0}` placeholder present in cmdline | **true** (required) |
+  | any environ value of 20+ characters present in argv | **none** |
+
+  MCP tool calls succeeded over the placeholder after the restart, so the CLI still
+  expands `${VAR}` at SDK `^0.3.165`. No value was printed.
+- **⚠ known gap (vikunja #1112 / id 1195), found at the `v1.37.4` deploy check:** the
+  **allowedTools** half of the guard misses two shapes. On boot it logged
+  `Dropped 7 secret-shaped allowedTools entries`. Evaluating `isSecretAllowedToolsEntry`
+  against the 230 live `--allowedTools` entries (redacted, lengths only) found two
+  secret-shaped entries that pass:
+  - `Bash(T=<tk_ + hex>:*)`: a single-letter variable, so no keyword pattern applies.
+  - `Bash(OLD_HASH='<bcrypt>':*)`: `HASH` is not a keyword, and bcrypt's `$`/`.` defeat
+    `QUOTED_SECRET`.
+
+  Both were already in argv under `v1.37.3`, so the sync did not cause this. The fix is
+  value-shape detection that does not depend on the variable name, tracked separately.
+  The MCP-bearer property above is unaffected.
 - **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
   directions (exit 1 / exit 0) and the unit probe passed 12/12; **lint probe run in both
   directions**, 1 error → 0 errors with the warning count unchanged (table above); env
@@ -297,8 +324,11 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
 - **last-verified:** `v1.37.4` on 2026-10-15. The static probe discriminates in both
   directions, the unit probe passes 9/9 and plugin-registry passes 6/6.
   `server/modules/plugins/` is **untouched upstream** between `v1.37.3` and `v1.37.4`, so
-  the cherry-pick was clean. **Startup-log signal still pending.** It needs Ted's
-  restart, and #1109 Phase 3 checks it.
+  the cherry-pick was clean. **Startup-log signal confirmed after the 11:25 restart:**
+  `[Plugins] "task-queue" granted env passthrough: TASK_QUEUE_API, CLOUDCLI_ORIGIN`, then
+  `Server started for "task-queue"`. `TASK_QUEUE_API_SECRET` is no longer in the granted
+  list. That is expected: the plugin now loads its client token from a file, and the
+  restart window checked that no PM2 app holds the secret.
 - **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
   directions, the unit probe passed 9/9 and plugin-registry passed 6/6.
   `server/modules/plugins/` cherry-picked with zero conflicts and was untouched by #1206. **Startup-log signal not re-run
@@ -353,8 +383,10 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   ```
 - **last-verified:** `v1.37.4` on 2026-10-15. The static probe discriminates in both
   directions and the runtime probe passes 5/5. The proxy service is **untouched upstream**
-  between `v1.37.3` and `v1.37.4`, so the cherry-pick was clean. **Live signal still
-  pending.** It needs Ted's restart, and #1109 Phase 3 checks it.
+  between `v1.37.3` and `v1.37.4`, so the cherry-pick was clean. **Live signal confirmed
+  after the restart:** 0 `WS proxy error` lines since boot, `WS proxy connected to
+  "task-queue" on port 34989` at 11:44:48 (the new plugin port), and Ted saw the Task
+  Queue badge read `live`.
 - **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
   directions, the runtime probe passed 5/5, and `server/modules/websocket/` was untouched by #1206, so
   the patch cherry-picked clean. **Live signal (the 403 count ceasing to rise, the tab
@@ -617,10 +649,10 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   directions and fails closed on a mangled anchor; runtime test 2/2 pass; full client suite
   57 files / 398 tests pass with the patch applied. **Live signal not yet confirmed** — it
   needs the next restart, since the storm only manifests on boot.
-- **live signal (still owed):** after the `v1.37.4` restart, check
-  `grep -c 'WebSocket connection attempt' ~/.pm2/logs/cloudcli-out.log`. It should stay at
-  single digits per minute after boot. This is #1109 Phase 3, and it checks upstream's fix
-  now, not ours.
+- **live signal, confirmed on upstream's fix (2026-10-15):** there were 5
+  `WebSocket connection attempt` lines in the 24 minutes after the 11:25 boot, 2 of them at
+  boot. The 2026-10-15 10:31 episode on `v1.37.3` + this patch had 11,542. The storm
+  stays gone with the patch dropped.
 
 ## forge-fork-docs-block
 
