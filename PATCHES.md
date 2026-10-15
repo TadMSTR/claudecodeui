@@ -31,7 +31,8 @@ dropped commits (`09f62510`, `bedbcd41`), with each pick open to inspection. **O
 message changed.** The commitlint hook now active on this tree rejects the `security:`
 type of `e97c8f19`, so that commit became `fix(security): …` (`0045f570`). Rewording it was
 better than committing with `--no-verify`. **`src/` is byte-identical to `v1.37.4`** now
-that the auth patch is retired.
+that the auth patch is retired. **No longer true from 2026-10-15:** `background-send-dialog` is a
+`src/` patch.
 
 **Deployed 2026-10-15 at 11:25** through `pm2-rehome-window.sh`, which also re-homed the
 PM2 daemon under `pm2-ted.service` (#1111). Upstream's DB migration added
@@ -76,7 +77,8 @@ for REF in v1.37.4 forge-local; do echo "== $REF"; <probe>; echo "exit $?"; done
 ```
 
 Both-direction results as of 2026-10-15 are recorded per entry. All **five** live probes
-read `1` against `v1.37.4` and `0` against `forge-local`. A valid "still fork-only"
+read `1` against `v1.37.4` and `0` against `forge-local`. (`background-send-dialog`,
+added after the sync, has the same shape: see its entry.) A valid "still fork-only"
 verdict has that shape. The sixth probe, `auth-verify-once-per-mount`, read `0` against
 **both** refs, meaning upstream covers it. It was retired only after the runtime test
 passed against upstream's code (see Retired). All four Retired probes still exit `0`
@@ -548,6 +550,73 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   control was not re-run — it mutates a live build directory — and is carried from
   `v1.37.2`, where it passed against a byte-identical `build:server`.
 
+
+---
+
+## background-send-dialog
+
+- **status:** pending-PR
+- **commits:** `d3adf7a7` (upstream branch `feat/background-send-dialog`, cut from
+  `origin/main` `92ccebc6`), `7ff426ab` (cherry-pick onto `forge-local`, 2026-10-15)
+- **upstream-pr:** not yet opened (needs Ted's approval: the PR is public)
+- **files:** `src/modules/chat/hooks/useChatComposerState.ts`,
+  `src/modules/chat/composer/BackgroundSendDialog.tsx` (new),
+  `src/modules/chat/composer/ChatComposer.tsx`, `src/modules/chat/ChatInterface.tsx`,
+  `src/shared/types.ts`, `src/modules/i18n/locales/{en,cs,he,pt-BR}/chat.json`,
+  `src/modules/chat/tests/composerSendOverBackgroundWork.test.ts`,
+  `src/modules/chat/tests/backgroundSendDialog.test.tsx` (new)
+- **why:** vikunja #1114 (id 1197), from #1108's (id 1191) acceptance check. After a turn
+  ends with background work still running, sending used `window.confirm`: OK (send, which
+  stops the work) or Cancel, with no Queue, and OK focused, so a second Enter killed the
+  work. The common agent wait (CI, `forge-wait.py`) is exactly this post-turn state. The
+  patch replaces the confirm with a Send anyway / Queue / Cancel dialog, with Cancel first
+  in the DOM so `Dialog`'s open-focus lands on it. Queue writes the existing server-side
+  queued message through the in-flight queue path (extracted to `queueMessage`) with the
+  attachments already uploaded. **No server change:** the dispatcher's `isSessionBusy`
+  (`scheduled-message-dispatcher.service.ts`) already includes `hasBackgroundWork`.
+- **first fork patch in `src/` since `auth-verify-once-per-mount` retired.** It cherry-picked
+  cleanly onto `forge-local`, because no upstream commit between `v1.37.4` and `92ccebc6`
+  touches the files above.
+- **probe:** three-state, auth-verify shape:
+  ```
+  f=src/modules/chat/hooks/useChatComposerState.ts
+  git show <ref>:$f 2>/dev/null | python3 -c "
+  import re,sys
+  s=sys.stdin.read()
+  i=s.find('ownBackgroundTasks(')
+  if not s or i<0: sys.exit(2)          # anchor gone: probe broken, NOT covered
+  block=s[i:i+2500]
+  if 'window.confirm' in block: sys.exit(1)               # still a two-way confirm
+  if re.search(r\"['\\\"]queue['\\\"]\", block): sys.exit(0)  # a queue choice exists
+  sys.exit(2)                                              # unknown shape: look by hand"
+  ```
+  2026-10-15: `v1.37.4` → **1**, `origin/main` (`92ccebc6`) → **1**, `forge-local` before the
+  pick (`dd90071c`) → **1**, `forge-local` after (`7ff426ab`) → **0**. Negative controls on
+  the patched file: `ownBackgroundTasks(` renamed → **2**; the `'queue'` branch renamed →
+  **2**. Discriminates in both directions, and a vanished anchor cannot read as covered.
+  **If upstream ships a different queue mechanism, expect 2, not 0.** Read the code before
+  retiring.
+- **tests:** 6 hook tests and 4 dialog tests. Each was seen failing under a recorded mutation
+  (2026-10-15, on the upstream branch):
+
+  | Mutation | Red |
+  |---|---|
+  | `queue` routed past (falls through to send) | queue test |
+  | `cancel` ignored | cancel test, re-entrancy test |
+  | `send` treated as cancel | send-anyway test |
+  | per-scope submit guard removed | re-entrancy test (times out on a second prompt) |
+  | queue re-uploads attachments | queue test (2 uploads) |
+  | Send anyway placed first in the DOM | focus test |
+  | dismiss (Esc / overlay) resolves `send` | Esc/overlay test |
+
+  Upstream branch: lint 0 errors (136 warnings, the same as `origin/main`), client
+  **755/755**. Server 682 pass / 3 fail / 1 skip: the same 3 symlink-in-temp tests fail on
+  clean `origin/main` in the same `/tmp` worktree. `tsc` has 1 error
+  (`recentConversationTitleSync.test.ts`), which is on `origin/main` too. `forge-local`:
+  client **737/737**.
+- **acceptance (pending restart):** #1114 Phase 3. Accidental Enter sends nothing. Queue: the
+  sleep exits 0 and the message is delivered after it. Send anyway behaves as before. A
+  35-minute silent wait is measured against the 30-minute silence ceiling (upstream #1535).
 
 ---
 
