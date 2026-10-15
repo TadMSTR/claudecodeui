@@ -266,8 +266,13 @@ against `v1.37.4`, so nothing upstream absorbed has regressed.
   negatives `Bash(git log:*)`, `Bash(npm run test:*)`, `mcp__*`, `Bash(X=1:*)`, a mixed-case
   path and a kebab-case name with digits all still pass. Every new pattern was seen red under
   a recorded mutation (7 mutations: each pattern off, the path exclusion off, the upper-case
-  gate off, the backstop off). **Deploy check pending:** after the restart, re-run the
-  redacted live-argv check (counts and lengths only).
+  gate off, the backstop off). **Deploy-checked 2026-10-15** (restart 15:11:19, build
+  `f14fad6e`): the redacted live-argv check over the one cloudcli-spawned `claude`
+  (counts and lengths only) found 13 `--allowedTools` entries, 0 flagged by the new guard,
+  0 `tk_`/bcrypt shapes and no backstop findings. Boot drop count was **1 before and 1
+  after** the restart, with 13 kept both times, so the new patterns produced no false
+  drops. The two original entries were already gone (Ted's preflight cleanup), so this
+  checks for false positives; the unit tests cover the two shapes.
 - **previously verified:** `v1.37.3` on 2026-09-10. The static probe discriminated in both
   directions (exit 1 / exit 0) and the unit probe passed 12/12; **lint probe run in both
   directions**, 1 error → 0 errors with the warning count unchanged (table above); env
