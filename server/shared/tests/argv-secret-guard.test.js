@@ -171,6 +171,12 @@ test('isSecretAllowedToolsEntry catches a long opaque value behind any variable 
 
 test('the value-shape patterns keep ordinary permission entries', () => {
   for (const entry of [
+    'Bash(gh auth status:*)',
+    'Bash(npm run task-scheduler:*)',
+    'Bash(git checkout feat/disk-usage-report:*)',
+    "Bash(awk '{print $1$2}':*)",
+    'Bash(BUILD=release2024:*)',
+    'Bash(pip install scikit-learn:*)',
     'Bash(git log:*)',
     'Bash(npm run test:*)',
     'mcp__scoped-mcp__task-queue-mcp_submit_task',
@@ -189,4 +195,57 @@ test('findArgvSecrets reports a token shape that slipped through', () => {
   const findings = findArgvSecrets({ allowedTools: ['Read', `Bash(T=tk_${syntheticHex(20)}:*)`] });
   assert.ok(findings.some((f) => f.kind === 'token-shape'));
   assert.deepEqual(findArgvSecrets({ allowedTools: ['Read', 'Bash(git log:*)'] }), []);
+});
+
+// Synthetic values only: random bytes in each format, never a real credential.
+const B62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const B64URL = B62 + '-_';
+const LOWER_DIGIT = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const synthetic = (alphabet, length) =>
+  Array.from(crypto.randomBytes(length), (byte) => alphabet[byte % alphabet.length]).join('');
+const base64url = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+const syntheticJwt = () =>
+  `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ sub: synthetic(B62, 12), exp: 1 })}.${synthetic(B64URL, 43)}`;
+
+test('isSecretAllowedToolsEntry catches bare vendor tokens with a known prefix (audit F-02)', () => {
+  for (const entry of [
+    `Bash(gh auth login --with-token ghp_${synthetic(B62, 36)}:*)`,
+    `Bash(git clone https://github_pat_${synthetic(B62 + '_', 82)}@github.com/x/y:*)`,
+    `Bash(curl -H x-api-key\\ sk-ant-api03-${synthetic(B64URL, 93)}:*)`,
+    `Bash(llm -k sk-proj-${synthetic(B64URL, 48)} prompt:*)`,
+    `Bash(glab auth login --token glpat-${synthetic(B64URL, 20)}:*)`,
+    `Bash(slack-cli --token xoxb-${synthetic('0123456789', 12)}-${synthetic(B62, 24)}:*)`,
+  ]) {
+    assert.equal(isSecretAllowedToolsEntry(entry), true, entry.slice(0, 30));
+  }
+});
+
+test('isSecretAllowedToolsEntry catches a bare JWT (audit F-02)', () => {
+  assert.equal(isSecretAllowedToolsEntry(`Bash(curl --oauth2-bearer ${syntheticJwt()} https://host:*)`), true);
+});
+
+test('isSecretAllowedToolsEntry catches argon2 and sha-crypt hashes (audit F-02)', () => {
+  const crypt = './' + B62;
+  for (const entry of [
+    `Bash(OLD=$argon2id$v=19$m=65536,t=3,p=4$${synthetic(B62, 22)}$${synthetic(B62, 43)}:*)`,
+    `Bash(echo '$6$${synthetic(crypt, 16)}$${synthetic(crypt, 86)}':*)`,
+    `Bash(echo '$5$rounds=5000$${synthetic(crypt, 16)}$${synthetic(crypt, 43)}':*)`,
+    `Bash(echo '$1$${synthetic(crypt, 8)}$${synthetic(crypt, 22)}':*)`,
+  ]) {
+    assert.equal(isSecretAllowedToolsEntry(entry), true, entry.slice(0, 20));
+  }
+});
+
+test('isSecretAllowedToolsEntry catches a long lowercase-and-digit value behind any variable name (audit F-02)', () => {
+  // At least one digit and one letter are guaranteed so the shape is the one under test.
+  const value = `a1${synthetic(LOWER_DIGIT, 40)}`;
+  assert.equal(isSecretAllowedToolsEntry(`Bash(X=${value}:*)`), true);
+  assert.equal(isSecretAllowedToolsEntry(`Bash(X=${value.slice(0, 38)}:*)`), false, 'below 40 it stays');
+});
+
+test('findArgvSecrets reports the new token shapes (audit F-02)', () => {
+  for (const text of [`ghp_${synthetic(B62, 36)}`, syntheticJwt()]) {
+    const findings = findArgvSecrets({ allowedTools: ['Read', `Bash(x ${text}:*)`] });
+    assert.ok(findings.some((f) => f.kind === 'token-shape'));
+  }
 });

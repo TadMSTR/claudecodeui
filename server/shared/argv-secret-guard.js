@@ -83,11 +83,27 @@ const VIKUNJA_TOKEN = /(?<![A-Za-z0-9])tk_[0-9a-f]{32,}/i;
 // which every keyword pattern reads as an env reference, and `$`/`.` defeat
 // QUOTED_SECRET's charset.
 const BCRYPT_HASH = /\$2[abxy]?\$\d{2}\$[./A-Za-z0-9]{22,}/;
-// Any assignment whose value is a long opaque run: pure hex of 32+, or 32+
-// base64/base64url characters mixing upper case, lower case and digits. A
-// path (leading `/`, `~` or `.`) or a kebab-case name has no such mix.
+// Any assignment whose value is a long opaque run: pure hex of 32+, 40+
+// lower case and digits (many vendor tokens), or 32+ base64/base64url
+// characters mixing upper case, lower case and digits. A path (leading `/`,
+// `~` or `.`) or a kebab-case name has no such run.
+// SECURITY[accepted]: false positives fail closed — a relative path with no
+// leading `./`, a mixed-case kebab name of 32+ characters, or `GIT_HASH=<sha>`
+// (LITERAL_ASSIGN) is dropped, which costs one permission prompt and exposes
+// nothing. No backtracking risk: 10^5–10^6-character adversarial inputs
+// evaluate in ≤8 ms. Audit: 2026-10-15/cloudcli-held-run-race-2026-10 (F-05).
 const OPAQUE_ASSIGN =
-  /(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*\s*=\s*['"]?(?![/~.])(?:[0-9a-fA-F]{32,}(?![A-Za-z0-9+/_-])|(?=[A-Za-z0-9+/_-]*[0-9])(?=[A-Za-z0-9+/_-]*[a-z])(?=[A-Za-z0-9+/_-]*[A-Z])[A-Za-z0-9+/_-]{32,})/;
+  /(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*\s*=\s*['"]?(?![/~.])(?:[0-9a-fA-F]{32,}(?![A-Za-z0-9+/_-])|(?=[a-z0-9]*[0-9])(?=[a-z0-9]*[a-z])[a-z0-9]{40,}(?![A-Za-z0-9+/_-])|(?=[A-Za-z0-9+/_-]*[0-9])(?=[A-Za-z0-9+/_-]*[a-z])(?=[A-Za-z0-9+/_-]*[A-Z])[A-Za-z0-9+/_-]{32,})/;
+// Vendor tokens with a fixed prefix, matched wherever they appear — a bare
+// `gh auth login --with-token ghp_…` or `x-api-key sk-ant-…` has no assignment
+// for the patterns above to key on (audit F-02, 2026-10-15).
+const PREFIXED_TOKEN =
+  /(?<![A-Za-z0-9_-])(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-(?:ant-|proj-)?[A-Za-z0-9_-]{32,}|glpat-[A-Za-z0-9_-]{20,}|xox[abeprs]-[A-Za-z0-9-]{20,})/;
+// A JWT: three base64url segments, the first two JSON objects (`eyJ` is `{"`).
+const JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
+// crypt(3) hashes other than bcrypt: argon2, sha-crypt ($5$/$6$), md5-crypt ($1$).
+const CRYPT_HASH =
+  /\$argon2(?:id|i|d)\$[^\s'"]{20,}|\$[156]\$(?:rounds=\d+\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{22,}/;
 
 // HTTP Basic-Auth credentials embedded in a URL: `scheme://user:pass@host`.
 // Catches unquoted, non-KV-shaped secrets like `curl https://u:s3cr3t@host`.
@@ -174,7 +190,10 @@ function isSecretAllowedToolsEntry(entry) {
     URL_CREDENTIALS.test(entry) ||
     VIKUNJA_TOKEN.test(entry) ||
     BCRYPT_HASH.test(entry) ||
-    OPAQUE_ASSIGN.test(entry)
+    OPAQUE_ASSIGN.test(entry) ||
+    PREFIXED_TOKEN.test(entry) ||
+    JWT.test(entry) ||
+    CRYPT_HASH.test(entry)
   );
 }
 
@@ -211,7 +230,9 @@ function findArgvSecrets(sdkOptions) {
     if (LITERAL_BEARER.test(text)) findings.push({ where, kind: 'bearer' });
     if (LITERAL_ASSIGN.test(text)) findings.push({ where, kind: 'assignment' });
     if (URL_CREDENTIALS.test(text)) findings.push({ where, kind: 'url-credentials' });
-    if (VIKUNJA_TOKEN.test(text) || BCRYPT_HASH.test(text)) findings.push({ where, kind: 'token-shape' });
+    if ([VIKUNJA_TOKEN, BCRYPT_HASH, PREFIXED_TOKEN, JWT, CRYPT_HASH].some((shape) => shape.test(text))) {
+      findings.push({ where, kind: 'token-shape' });
+    }
   }
   return findings;
 }
