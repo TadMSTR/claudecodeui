@@ -104,6 +104,18 @@ here so the next sync knows the state.
   auto-declined, and `POST /api/agent` can pass `unattended: false` to keep them open.
   PR #1714 (1.37.8): an opt-in outbound webhook channel, left unconfigured (#1471).
 
+## Deploy (2026-11-22)
+
+`forge-local` moved from `48ad111d` (`v1.37.4`) to `d36dbd01` and deployed by
+shared-build-finalize Step 5b (build `cloudcli-fork-1-37-8-sync-2026-11`). Times UTC.
+
+| Row | Time | Result |
+|---|---|---|
+| 4 restart (Ted, SSH) | 15:41:47 | `package.json` 1.37.9; migration "Adding reason column to superseded_provider_sessions" completed, no error; one God Daemon in `pm2-ted.service`; core limit 0 |
+| 5 argv guard `/proc` | 15:47:02 | live child of cloudcli: `CLOUDCLI_MCP_SECRET_0` in environ, not in cmdline; `${CLOUDCLI_MCP_SECRET_0}` is the scoped-mcp `Authorization` header in `--mcp-config`; 0 environ values of 20+ chars in argv; MCP call over the placeholder succeeded. **Pass at SDK `^0.3.311`** |
+| 6 plugin probes | 15:44:29 | `granted env passthrough:` then `Server started for "task-queue"`; `WS proxy connected to "task-queue"` 15:43:47; 0 `WS proxy error` |
+| 7 held-run acceptance | not run | the live repro needs a CloudCLI login. Ted accepted it on the 38/38 held-run tests plus the `v1.37.4` live acceptance. The untested part is upstream's `v1.37.9` queued-dispatcher rework (PRs #1697, #1763). Re-run: vikunja #1586 (id 1669) |
+
 **Probe exit convention:** every probe below exits **0 if and only if upstream covers the
 patch**, so a passing probe means the entry can be retired. A failing probe means the
 fork still needs to carry it. **Exit 2 means the probe's anchor is gone and the probe is
@@ -222,8 +234,8 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
 - **last-verified:** `v1.37.9` on 2026-11-22, **build-verified**. Static probe 1 / 0; unit
   test 23/23; under the recorded mutation (`externalizeMcpSecrets` returning early) it goes
   red, 3 of 23 failing (externalize, clobber-avoid, clean-after-externalize); lint probe
-  1 → 0 with identical warnings; env chain re-measured above; typecheck 0 errors. **Not yet
-  deploy-verified at SDK `^0.3.311`:** the `/proc` probe runs after the restart (deploy row 5).
+  1 → 0 with identical warnings; env chain re-measured above; typecheck 0 errors. **Deploy-verified at SDK `^0.3.311`** on 2026-11-22 15:47 UTC: all four
+  `/proc` assertions passed and an MCP call succeeded over the placeholder (deploy row 5).
 - **previously verified:** `v1.37.4` on 2026-10-15, deploy-verified at SDK `^0.3.165` (the
   `/proc` probe passed all four assertions and MCP calls succeeded over the placeholder).
 
@@ -288,7 +300,8 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   F-08) and plugin-registry 6/6. Upstream changed `server/modules/plugins/` between `v1.37.4` and
   `v1.37.9` (a new `plugin-git.service.ts`, and small edits to `plugin-registry.service.ts`
   and `plugins.service.ts`), but the fork's commit cherry-picked without conflict. The
-  startup-log signal (`granted env passthrough:` for task-queue) is deploy row 6.
+  startup-log signal (`granted env passthrough:` for task-queue) was seen live at deploy row 6
+  (2026-11-22).
 - **previously verified:** `v1.37.4` on 2026-10-15, including the live startup line
   `[Plugins] "task-queue" granted env passthrough: TASK_QUEUE_API, CLOUDCLI_ORIGIN`.
 
@@ -338,7 +351,7 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   ```
 - **last-verified:** `v1.37.9` on 2026-11-22. Static probe 1 / 0; runtime probe 5/5. The
   proxy service is untouched upstream between `v1.37.4` and `v1.37.9`, so the pick was
-  clean. The live signal (`WS proxy connected`, 0 `WS proxy error`) is deploy row 6.
+  clean. Live at deploy row 6 (2026-11-22): `WS proxy connected`, 0 `WS proxy error`.
 - **previously verified:** `v1.37.4` on 2026-10-15, live: 0 `WS proxy error` lines since
   boot and the Task Queue badge read `live`.
 
@@ -689,7 +702,8 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   `provider-runtime.service.test.ts` plus `sessions.service.test.ts`: **38/38** on
   `sync/v1.37.9`.
 - **last-verified:** `v1.37.9` on 2026-11-22, build-verified. Probe 1 / 0 with controls;
-  tests green; typecheck 0 errors. Live acceptance is deploy row 7.
+  tests green; typecheck 0 errors. Deployed 2026-11-22; live acceptance (deploy row 7)
+  not run, accepted by Ted on the tests. Re-run: vikunja #1586 (id 1669).
 - **previously verified:** `v1.37.4`, deployed and accepted 2026-10-15 (restarts 15:11:19
   and 16:29:33). Queue across a forced ~56 s relay: delivered after the relay's `result`,
   at most 1 process per 2 s sample, 0 forks.
@@ -734,7 +748,8 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   2026-11-22: `v1.37.9` → **1**, `sync/v1.37.9` → **0**. Negative controls: the
   `runningById.set` line removed → **1**; `listBusyClaudeCliSessions()` renamed → **2**.
 - **last-verified:** `v1.37.9` on 2026-11-22, build-verified (probe 1 / 0 with controls;
-  server tests green; client 1177 = upstream's 1176 + this patch's 1).
+  server tests green; client 1177 = upstream's 1176 + this patch's 1). Deployed 2026-11-22;
+  live acceptance (deploy row 7) not run, see `held-run-relay-turn`.
 - **previously verified:** `v1.37.4`, deployed and accepted 2026-10-15: exactly one entry
   per session in about 600 samples. **Exception, #1117 (id 1200):** a process spawned by
   Send anyway reads registry `busy` for its whole next wait, so the session lists as
