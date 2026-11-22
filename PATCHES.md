@@ -49,11 +49,11 @@ worktrees:
 
 | | clean `v1.37.9` | fork (final, with `viewer-secret-paths`) |
 |---|---|---|
-| server (`npm test`) | 1061 tests, 1060 pass, 1 skip (2 of 3 runs; the third had one load flake) | 1144 tests, 1142 pass, 2 skip (after the audit remediation; `agent.routes.test.ts` counted from its solo run, see below) |
+| server (`npm test`) | 1061 tests, 1060 pass, 1 skip (2 of 3 runs; the third had one load flake) | 1140 tests, 1138 pass, 0 fail, 2 skip (after the audit remediation, a clean run) |
 | client (`npm run test:client`) | 159 files, 1176 pass | 159 files, 1178 pass |
 | `npm run lint` | — | exit 0, 0 errors, 147 warnings |
 
-The fork's +83 server tests are its own (10 of them from the audit remediation). The second skip is the busy-check route test, which `ui-updaters-off` skips
+The fork's +79 server tests are its own (10 of them from the audit remediation). The second skip is the busy-check route test, which `ui-updaters-off` skips
 unless `CLOUDCLI_ALLOW_UI_UPDATE=1`; it passes with it set. Every full-suite failure seen on the fork across
 four runs is a load-sensitive upstream test that passes alone, in a file no fork commit
 changes:
