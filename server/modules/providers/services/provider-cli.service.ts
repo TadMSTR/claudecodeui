@@ -5,7 +5,7 @@ import { sessionsService } from '@/modules/providers/services/sessions.service.j
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import type { IProvider } from '@/shared/interfaces.js';
 import type { CliVersionProbe, LLMProvider } from '@/shared/types.js';
-import { AppError, IS_PLATFORM, stripAnsiSequences } from '@/shared/utils.js';
+import { AppError, IS_PLATFORM, stripAnsiSequences, UI_UPDATE_ALLOWED, UI_UPDATE_DISABLED_MESSAGE } from '@/shared/utils.js';
 
 /** How long the registry's answer is reused before it is asked again. */
 const LATEST_VERSION_TTL_MS = 60 * 60 * 1000;
@@ -66,7 +66,7 @@ const CLI_UPDATERS: Partial<Record<LLMProvider, CliUpdater>> = {
 };
 
 /** Why the settings page offers no update: the CLI ships with CloudCLI, or the hosting platform manages the CLIs. */
-type CliUpdateUnavailableReason = 'bundled' | 'platform';
+type CliUpdateUnavailableReason = 'bundled' | 'platform' | 'disabled';
 
 /** Why an update run went wrong, as read from its exit code and output. */
 type CliUpdateFailure = 'permission_denied' | 'timed_out' | 'failed';
@@ -129,6 +129,8 @@ type ProviderCliServiceDependencies = {
   listBusyProviders(): Promise<LLMProvider[]>;
   fetch: typeof fetch;
   platformMode: boolean;
+  /** Fork patch `ui-updaters-off`: whether the operator allowed updates from the UI (`CLOUDCLI_ALLOW_UI_UPDATE=1`). */
+  uiUpdateAllowed: boolean;
   now(): number;
   latestVersionTimeoutMs: number;
   updateTimeoutMs: number;
@@ -140,6 +142,7 @@ const defaultDependencies: ProviderCliServiceDependencies = {
   listBusyProviders: async () => (await sessionsService.listRunningSessions()).map((session) => session.provider),
   fetch: (input, init) => fetch(input, init),
   platformMode: IS_PLATFORM,
+  uiUpdateAllowed: UI_UPDATE_ALLOWED,
   now: () => Date.now(),
   latestVersionTimeoutMs: LATEST_VERSION_TIMEOUT_MS,
   updateTimeoutMs: UPDATE_TIMEOUT_MS,
@@ -403,7 +406,7 @@ export function createProviderCliService(dependencyOverrides: Partial<ProviderCl
       const update = resolveUpdateCommand(provider.id);
       const updateUnavailableReason: CliUpdateUnavailableReason | null = dependencies.platformMode
         ? 'platform'
-        : update ? null : 'bundled';
+        : !update ? 'bundled' : dependencies.uiUpdateAllowed ? null : 'disabled';
 
       // The registry is only worth asking when the answer can lead to an update
       // of a CLI that is there.
@@ -444,6 +447,12 @@ export function createProviderCliService(dependencyOverrides: Partial<ProviderCl
       if (dependencies.platformMode) {
         throw new AppError('The hosting platform manages the CLIs on this server.', {
           code: 'PROVIDER_CLI_UPDATE_UNAVAILABLE',
+          statusCode: 403,
+        });
+      }
+      if (!dependencies.uiUpdateAllowed) {
+        throw new AppError(UI_UPDATE_DISABLED_MESSAGE, {
+          code: 'PROVIDER_CLI_UPDATE_DISABLED',
           statusCode: 403,
         });
       }

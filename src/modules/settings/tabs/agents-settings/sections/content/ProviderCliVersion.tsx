@@ -103,6 +103,8 @@ export default function ProviderCliVersion({ agent, installedVersion, textClass,
     detail = t('agents.cli.bundled');
   } else if (status?.updateUnavailableReason === 'platform') {
     detail = t('agents.cli.platform');
+  } else if (status?.updateUnavailableReason === 'disabled') {
+    detail = t('agents.cli.disabled');
   } else if (status?.updateAvailable && status.latestVersion) {
     detail = t('agents.cli.updateAvailable', { version: status.latestVersion });
   } else if (status?.latestVersion && version) {

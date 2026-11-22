@@ -13,7 +13,7 @@ import providerRouter from '@/modules/providers/provider.routes.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { IProvider } from '@/shared/interfaces.js';
 import type { BackgroundTaskSummary, WorkflowAgentActivity } from '@/shared/types.js';
-import { AppError, IS_PLATFORM } from '@/shared/utils.js';
+import { AppError, IS_PLATFORM, UI_UPDATE_ALLOWED } from '@/shared/utils.js';
 
 async function withProviderServer(
   run: (baseUrl: string, workspacePath: string) => Promise<void>,
@@ -451,7 +451,10 @@ test('the running-sessions route reports a session held open for background work
 });
 
 test('the CLI update route refuses while that provider is busy in a session', {
-  skip: IS_PLATFORM ? 'platform mode refuses every CLI update before the busy check' : false,
+  skip: IS_PLATFORM
+    ? 'platform mode refuses every CLI update before the busy check'
+    // Fork patch ui-updaters-off refuses first; run with CLOUDCLI_ALLOW_UI_UPDATE=1 to reach the busy check.
+    : !UI_UPDATE_ALLOWED ? 'updates from the UI are off (fork patch ui-updaters-off); covered by the next test' : false,
 }, async () => {
   // A session held open for background work counts as busy, like a running
   // chat: replacing the CLI under it could break the work it is still doing.
@@ -497,6 +500,47 @@ test('the CLI update route refuses while that provider is busy in a session', {
     });
   } finally {
     providerRegistry.listProviders = realListProviders;
+    if (previousCliPath === undefined) {
+      delete process.env.CLAUDE_CLI_PATH;
+    } else {
+      process.env.CLAUDE_CLI_PATH = previousCliPath;
+    }
+    await rm(cliDirectory, { recursive: true, force: true });
+  }
+});
+
+// Fork patch ui-updaters-off: without CLOUDCLI_ALLOW_UI_UPDATE=1 the route refuses and never runs the CLI.
+test('the CLI update route refuses every update when updates from the UI are off', {
+  skip: IS_PLATFORM ? 'platform mode refuses every CLI update first' : UI_UPDATE_ALLOWED ? 'CLOUDCLI_ALLOW_UI_UPDATE=1 is set' : false,
+}, async () => {
+  const cliDirectory = await mkdtemp(path.join(os.tmpdir(), 'provider-routes-cli-'));
+  const callLog = path.join(cliDirectory, 'calls.log');
+  const stubPath = path.join(cliDirectory, process.platform === 'win32' ? 'claude.cmd' : 'claude');
+  await writeFile(callLog, '');
+  await writeFile(
+    stubPath,
+    process.platform === 'win32'
+      ? `@echo off\r\necho %* >> "${callLog}"\r\necho 2.1.200 (Claude Code)\r\n`
+      : `#!/bin/sh\necho "$*" >> "${callLog}"\necho "2.1.200 (Claude Code)"\n`,
+  );
+  await chmod(stubPath, 0o755);
+  const previousCliPath = process.env.CLAUDE_CLI_PATH;
+  process.env.CLAUDE_CLI_PATH = stubPath;
+
+  try {
+    await withProviderServer(async (baseUrl) => {
+      const refused = await fetch(`${baseUrl}/api/providers/claude/cli/update`, { method: 'POST' });
+      const refusedPayload = await refused.json() as { error: { code: string } };
+      assert.equal(refused.status, 403);
+      assert.equal(refusedPayload.error.code, 'PROVIDER_CLI_UPDATE_DISABLED');
+
+      const status = await fetch(`${baseUrl}/api/providers/claude/cli`);
+      const statusPayload = await status.json() as { data: { updateUnavailableReason: string; updateCommand: null } };
+      assert.equal(statusPayload.data.updateUnavailableReason, 'disabled');
+      assert.equal(statusPayload.data.updateCommand, null);
+      assert.ok(!(await readFile(callLog, 'utf8')).includes('update'), 'a refused update never runs the CLI updater');
+    });
+  } finally {
     if (previousCliPath === undefined) {
       delete process.env.CLAUDE_CLI_PATH;
     } else {

@@ -43,6 +43,20 @@ import type {
  */
 export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
 
+/**
+ * Fork patch `ui-updaters-off` (forge-local). The two in-UI updaters, a
+ * provider CLI's own updater and the whole-app `npm install -g` / `git pull`,
+ * replace pinned software outside the operator's update procedure, and the
+ * global install replaces this fork with the unpatched registry build. Both are
+ * refused unless the operator sets `CLOUDCLI_ALLOW_UI_UPDATE=1` in the server's
+ * environment.
+ */
+export const UI_UPDATE_ALLOWED = process.env.CLOUDCLI_ALLOW_UI_UPDATE === '1';
+
+/** What a refused in-UI update tells the caller. */
+export const UI_UPDATE_DISABLED_MESSAGE =
+  'Updates from the UI are turned off on this server. Update through the operator\'s pinned procedure, or set CLOUDCLI_ALLOW_UI_UPDATE=1.';
+
 // ---------------------------
 //----------------- NORMALIZED MESSAGE HELPER INPUT TYPES ------------
 /**

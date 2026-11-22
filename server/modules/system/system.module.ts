@@ -3,6 +3,8 @@ import os from 'node:os';
 import spawn from 'cross-spawn';
 import type { Router } from 'express';
 
+import { UI_UPDATE_ALLOWED } from '@/shared/utils.js';
+
 import { createSystemRouter } from './system.routes.js';
 import { createSystemUpdateService } from './system.service.js';
 
@@ -52,6 +54,7 @@ export function createSystemModule(options: SystemModuleOptions): Router {
   const systemUpdateService = createSystemUpdateService({
     ...options,
     homeDirectory: os.homedir(),
+    uiUpdateAllowed: UI_UPDATE_ALLOWED,
     environment: process.env,
     runShellCommand,
     logInfo: (message, detail) => console.log(message, detail ?? ''),

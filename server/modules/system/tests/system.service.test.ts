@@ -13,6 +13,7 @@ function createDependencies(
     homeDirectory: '/home/cloudcli',
     installMode: 'git',
     isPlatform: false,
+    uiUpdateAllowed: true,
     environment: { TEST_ENVIRONMENT: 'true' },
     runShellCommand: async () => ({ exitCode: 0, output: 'updated', errorOutput: '' }),
     logInfo: () => undefined,
@@ -115,4 +116,24 @@ test('process startup errors retain their message for the existing API contract'
     success: false,
     error: 'spawn sh failed',
   });
+});
+
+// Fork patch `ui-updaters-off`: the global install would replace this fork with the registry build.
+test('updates from the UI are refused, and nothing runs, unless the operator allows them', async () => {
+  const calls: string[] = [];
+  const service = createSystemUpdateService(createDependencies({
+    uiUpdateAllowed: false,
+    installMode: 'npm',
+    runShellCommand: async (command) => {
+      calls.push(command);
+      return { exitCode: 0, output: '', errorOutput: '' };
+    },
+  }));
+
+  const result = await service.updateSystem();
+
+  assert.deepEqual(calls, []);
+  assert.equal(result.success, false);
+  assert.ok('disabled' in result && result.disabled);
+  assert.match(result.error, /CLOUDCLI_ALLOW_UI_UPDATE=1/);
 });

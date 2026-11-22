@@ -1,3 +1,5 @@
+import { UI_UPDATE_DISABLED_MESSAGE } from '@/shared/utils.js';
+
 type SystemUpdateCommandResult = {
   exitCode: number | null;
   output: string;
@@ -9,6 +11,8 @@ type SystemUpdateDependencies = {
   homeDirectory: string;
   installMode: 'git' | 'npm';
   isPlatform: boolean;
+  /** Fork patch `ui-updaters-off`: whether the operator allowed updates from the UI (`CLOUDCLI_ALLOW_UI_UPDATE=1`). */
+  uiUpdateAllowed: boolean;
   environment: NodeJS.ProcessEnv;
   runShellCommand(
     command: string,
@@ -29,6 +33,15 @@ export function createSystemUpdateService(dependencies: SystemUpdateDependencies
   return {
     /** Selects and executes the correct update workflow for this installation. */
     async updateSystem() {
+      if (!dependencies.uiUpdateAllowed) {
+        dependencies.logError('Refused system update from the UI:', 'CLOUDCLI_ALLOW_UI_UPDATE is not set');
+        return {
+          success: false as const,
+          disabled: true as const,
+          error: UI_UPDATE_DISABLED_MESSAGE,
+        };
+      }
+
       const updateCommand = dependencies.isPlatform
         ? 'npm run update:platform'
         : dependencies.installMode === 'git'

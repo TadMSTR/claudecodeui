@@ -238,6 +238,19 @@ describe('ProviderCliVersion', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
+  // Fork patch ui-updaters-off.
+  it('says updates from the UI are off and offers no update when the operator has not allowed them', async () => {
+    responses.status = [claudeStatus({
+      latestVersion: null,
+      updateAvailable: false,
+      updateCommand: null,
+      updateUnavailableReason: 'disabled',
+    })];
+    renderRow();
+    expect(await screen.findByText('Updates from the UI are turned off on this server.')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
   it('stops saying it is checking when the version cannot be loaded', async () => {
     responses.status = [json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } }, 500)];
     vi.spyOn(console, 'error').mockImplementation(() => {});

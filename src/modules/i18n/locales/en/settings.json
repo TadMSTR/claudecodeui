@@ -469,6 +469,7 @@
       "upToDate": "Up to date",
       "bundled": "Ships with CloudCLI and is updated together with it.",
       "platform": "Managed by the hosting platform.",
+      "disabled": "Updates from the UI are turned off on this server.",
       "updateTo": "Update to v{{version}}",
       "runUpdater": "Run updater",
       "updating": "Updating…",

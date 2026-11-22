@@ -167,6 +167,7 @@ afterEach(() => {
 const createService = (overrides: Parameters<typeof createProviderCliService>[0] = {}) => createProviderCliService({
   listBusyProviders: async () => [],
   platformMode: false,
+  uiUpdateAllowed: true,
   fetch: (async (input: string | URL | Request) => {
     unexpectedRegistryCalls.push(String(input));
     throw new Error('the registry must not be contacted in this test');
@@ -462,6 +463,32 @@ test('Cursor has no npm release to compare with; Codex ships with CloudCLI; plat
     assert.equal(platformClaude.latestVersion, null);
     assert.equal(platformClaude.updateAvailable, false);
   });
+});
+
+// Fork patch `ui-updaters-off`: without CLOUDCLI_ALLOW_UI_UPDATE=1 the updater is never offered or run.
+test('updates from the UI are refused, and not offered, unless the operator allows them', async () => {
+  await withIsolatedCliEnv(async (binDir) => {
+    const claude = await createFakeCli(binDir, 'claude');
+    await claude.set('version', '2.1.200 (Claude Code)\n');
+    const service = createService({ uiUpdateAllowed: false });
+
+    const status = await service.getCliStatus('claude');
+    assert.equal(status.installedVersion, '2.1.200');
+    assert.equal(status.updateCommand, null);
+    assert.equal(status.updateUnavailableReason, 'disabled');
+    assert.equal(status.latestVersion, null);
+    await rejectsWithAppError(service.updateCli('claude'), 'PROVIDER_CLI_UPDATE_DISABLED', 403);
+    assert.equal(await claude.read('update-count'), null);
+  });
+});
+
+test('the server refuses updates from the UI when CLOUDCLI_ALLOW_UI_UPDATE is not set', async () => {
+  // The default comes from the environment this test process started with.
+  const { UI_UPDATE_ALLOWED } = await import('@/shared/utils.js');
+  assert.equal(UI_UPDATE_ALLOWED, process.env.CLOUDCLI_ALLOW_UI_UPDATE === '1');
+  if (process.env.CLOUDCLI_ALLOW_UI_UPDATE !== '1') {
+    await rejectsWithAppError(createProviderCliService().updateCli('claude'), 'PROVIDER_CLI_UPDATE_DISABLED', 403);
+  }
 });
 
 // ----------------- the update action ------------
