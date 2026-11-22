@@ -103,6 +103,19 @@ test('a declared, allowlisted var that is unset in the host env is not added', (
   }
 });
 
+test('a declared, allowlisted var that is unset in the host env is named in a warning (audit F-08)', (t) => {
+  const prev = process.env[ALLOWED_VAR];
+  delete process.env[ALLOWED_VAR];
+  const warn = t.mock.method(console, 'warn', () => {});
+  try {
+    buildPluginEnv('task-queue', [`env:${ALLOWED_VAR}`]);
+    const messages = warn.mock.calls.map((call) => String(call.arguments[0]));
+    assert.ok(messages.some((message) => message.includes(ALLOWED_VAR) && message.includes('not set')), messages.join('\n'));
+  } finally {
+    if (prev !== undefined) process.env[ALLOWED_VAR] = prev;
+  }
+});
+
 test('a passthrough cannot clobber a fixed baseline var', () => {
   const prev = process.env.PLUGIN_NAME;
   process.env.PLUGIN_NAME = 'attacker-controlled';

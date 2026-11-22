@@ -66,7 +66,8 @@ export function envPassthroughVars(permissions) {
  * A plugin may opt in to specific additional host vars by declaring
  * `env:<VAR_NAME>` in its manifest `permissions`. This is an explicit,
  * per-plugin allowlist — the default stays secret-free, and a var is only
- * passed through when the plugin declares it AND it is set in the host env.
+ * passed through when the plugin declares it, the host lists it in
+ * PLUGIN_ENV_ALLOWLIST, AND it is set in the host env.
  * (e.g. cloudcli-plugin-task-queue declares `env:TASK_QUEUE_API_SECRET` so its
  * control-API calls can authenticate.)
  */
@@ -107,6 +108,9 @@ export function buildPluginEnv(name, permissions = []) {
     if (process.env[varName] !== undefined) {
       env[varName] = process.env[varName];
       granted.push(varName);
+    } else {
+      // Names only. Without this the plugin's calls fail later with nothing naming the cause.
+      console.warn(`[Plugins] "${name}" declared env "${varName}" but it is not set in the host environment — not passed`);
     }
   }
   if (granted.length > 0) {

@@ -10,7 +10,9 @@
  * `--mcp-config <json>` and `options.allowedTools` into `--allowedTools <csv>`.
  * Any literal secret in those objects lands in the child's command line.
  *
- * Both mitigations rely on a property verified against claude CLI 2.1.212: the
+ * Both mitigations rely on a property verified against claude CLI 2.1.212
+ * (SDK ^0.3.165). The v1.37.9 sync moved the SDK pin to ^0.3.311, which
+ * re-opens it until the deploy's /proc argv probe passes again. The property: the
  * CLI expands `${VAR}` in MCP header values from its own process environment
  * even when the config arrives via inline `--mcp-config`, not only from a
  * `.mcp.json` file. So we can leave a `${VAR}` placeholder in argv and put the

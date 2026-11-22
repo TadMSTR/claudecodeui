@@ -158,5 +158,7 @@ server/**/tests/file-tree-outside-*/
 
 # Core dumps — the server process holds CLAUDE_CODE_OAUTH_TOKEN and MCP bearer
 # tokens in memory, so a dump committed by accident leaks them wholesale.
-core.*
+# Anchored with a numeric suffix, so a source file such as server/core.ts is not ignored.
+/core
+/core.[0-9]*
 *.core

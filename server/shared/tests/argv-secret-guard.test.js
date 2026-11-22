@@ -13,7 +13,10 @@ import {
 
 // Synthetic fixture only — a 64-hex-shaped value with digits so it exercises
 // the same detection path as a real scoped-mcp bearer token. NOT a real secret.
-const SYNTHETIC_TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+// Built at runtime so secret scanners do not trip on a literal (audit F-11).
+const SYNTHETIC_TOKEN = '0123456789abcdef'.repeat(4);
+// Synthetic URL-userinfo password, built at runtime for the same reason.
+const SYNTHETIC_PASSWORD = ['s3cr3t', 'pass'].join('');
 
 test('isSecretHeaderValue flags literal Authorization but skips ${VAR} placeholders', () => {
   assert.equal(isSecretHeaderValue('Authorization', `Bearer ${SYNTHETIC_TOKEN}`), true);
@@ -79,7 +82,7 @@ test('isSecretAllowedToolsEntry catches underscore-prefixed env-var secrets (SMC
   assert.equal(isSecretAllowedToolsEntry(`Bash(DB_PASSWORD=${SYNTHETIC_TOKEN}:*)`), true);
   assert.equal(isSecretAllowedToolsEntry(`Bash(SCOPED_MCP_BEARER_TOKEN=${SYNTHETIC_TOKEN}:*)`), true);
   assert.equal(isSecretAllowedToolsEntry(`Bash(export API_SECRET_KEY=${SYNTHETIC_TOKEN} && run)`), true);
-  assert.equal(isSecretAllowedToolsEntry('Bash(MY_DSN=postgres://u:p4ssword@host/db1234:*)'), true);
+  assert.equal(isSecretAllowedToolsEntry(`Bash(MY_DSN=postgres://u:${SYNTHETIC_PASSWORD}@host/db1234:*)`), true);
   // Lowercase underscore variants too (case-insensitive).
   assert.equal(isSecretAllowedToolsEntry(`Bash(my_password=${SYNTHETIC_TOKEN}:*)`), true);
   // Still a no-op for the env-reference form.
@@ -87,7 +90,7 @@ test('isSecretAllowedToolsEntry catches underscore-prefixed env-var secrets (SMC
 });
 
 test('isSecretAllowedToolsEntry catches basic-auth credentials embedded in a URL (SMCP-41 audit LOW)', () => {
-  assert.equal(isSecretAllowedToolsEntry('Bash(curl https://user:s3cr3tpass@host/path:*)'), true);
+  assert.equal(isSecretAllowedToolsEntry(`Bash(curl https://user:${SYNTHETIC_PASSWORD}@host/path:*)`), true);
   // A userinfo-free URL is not a credential.
   assert.equal(isSecretAllowedToolsEntry('Bash(curl https://host/path:*)'), false);
 });

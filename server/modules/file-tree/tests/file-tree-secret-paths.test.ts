@@ -37,7 +37,10 @@ const realFileSystem: FileTreeFileSystem = {
 type Home = { home: string; project: string; service: FileTreeServices; projects: Map<string, string> };
 
 /** A scratch home with credentials, a project inside it, and a viewer rooted at that home (forge's default). */
-async function withHome(run: (home: Home) => Promise<void>): Promise<void> {
+async function withHome(
+  run: (home: Home) => Promise<void>,
+  resolveReadOnlyRootPath: (candidatePath: string) => Promise<string | null> = async () => null,
+): Promise<void> {
   const home = await fsPromises.realpath(await fsPromises.mkdtemp(path.join(os.tmpdir(), 'viewer-secret-home-')));
   const previousHome = process.env.HOME;
   process.env.HOME = home;
@@ -62,7 +65,7 @@ async function withHome(run: (home: Home) => Promise<void>): Promise<void> {
       workspace: {
         rootPath: home,
         validatePath: async (candidatePath) => ({ valid: true, resolvedPath: candidatePath }),
-        resolveReadOnlyRootPath: async () => null,
+        resolveReadOnlyRootPath,
       },
       resolveMimeType: () => 'text/plain',
       fileSystemConcurrency: 4,
@@ -206,5 +209,41 @@ test('the folder browser will not list a credential directory', async () => {
   await withHome(async ({ service }) => {
     await assertSecretRefusal(service.browseWorkspace('~/.ssh'));
     assert.ok((await service.browseWorkspace('~/repo')).suggestions.length >= 1);
+  });
+});
+
+// Audit F-10: each refusal below has its own test, so removing one turns a test red.
+test('a credential path served through a read-only root is refused', async () => {
+  let readOnlyRootAsked = false;
+  await withHome(async ({ home, service }) => {
+    await assertSecretRefusal(service.readTextFile('app', path.join(home, '.ssh', 'id_test')));
+    assert.ok(readOnlyRootAsked);
+  }, async (candidatePath) => {
+    readOnlyRootAsked = true;
+    return candidatePath;
+  });
+});
+
+test('the folder creator will not create a folder inside a credential directory', async () => {
+  await withHome(async ({ home, service }) => {
+    await assertSecretRefusal(service.createWorkspaceFolder(path.join(home, '.ssh', 'planted')));
+    await assert.rejects(fsPromises.access(path.join(home, '.ssh', 'planted')));
+  });
+});
+
+test('an upload whose relative path lands in a credential directory is skipped and leaves no file', async () => {
+  await withHome(async ({ home, service }) => {
+    const temporaryPath = path.join(home, 'upload.tmp');
+    await fsPromises.writeFile(temporaryPath, 'synthetic');
+    const result = await service.storeUploadedFiles({
+      projectId: 'home',
+      targetPath: '.',
+      relativePaths: ['.ssh/planted'],
+      requestedFileCount: 1,
+      files: [{ originalName: 'planted', temporaryPath, size: 9, mimeType: 'text/plain' }],
+    });
+    assert.equal(result.uploadedCount, 0);
+    await assert.rejects(fsPromises.access(path.join(home, '.ssh', 'planted')));
+    await assert.rejects(fsPromises.access(temporaryPath));
   });
 });
