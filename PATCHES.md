@@ -499,6 +499,14 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   same), `~/.pm2` (the saved process list records each process's env),
   `~/docker` (every compose stack's env file), and the tool credential stores `~/.netrc`,
   `~/.git-credentials`, `~/.npmrc`, `~/.docker`, `~/.aws`, `~/.kube` and `~/.config/gh`.
+  After a names-only sweep of forge's home: `~/.pki`, `~/.password-store`, `~/.ansible`,
+  `~/.semgrep`, the other agent CLIs' logins (`~/.codex`, `~/.gemini`, `~/.cursor`,
+  `~/.config/Claude`, `~/.local/share/opencode`), `~/.claude-code-ui` (the older data
+  directory), the desktop keyring, `~/.mozilla`, mail and online-account stores, Backrest's
+  config and `~/backrest-restore`, `~/.config/fleet-tunnel`,
+  `~/.config/cloudcli-plugin-task-queue`, and shell history.
+  Ted chose (2026-11-22, pre-audit) to keep a deny-list, extend it to what the sweep
+  found, and report it to security as best-effort, over an allow-list or `WORKSPACES_ROOT`.
   The pre-audit added everything from `~/.claude.json` on: the first list left the compose
   env files and PM2's env dump readable. **The list is a deny-list**, so a credential store
   it doesn't name stays readable; anyone signed in also has CloudCLI's own terminal, so

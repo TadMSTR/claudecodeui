@@ -8,6 +8,10 @@
  * The check runs on the path the viewer resolved, both as written and with
  * symlinks resolved, so a link planted inside a project cannot point at one of
  * these directories either.
+ *
+ * This is a deny-list, so it is best-effort: a credential store it does not
+ * name stays readable. Anyone signed in also has CloudCLI's own terminal, so it
+ * is defence in depth for the viewer, not the boundary.
  */
 import { realpath } from 'node:fs/promises';
 import os from 'node:os';
@@ -34,6 +38,35 @@ const SECRET_HOME_PATHS = [
   '.aws',
   '.kube',
   path.join('.config', 'gh'),
+  '.pki',
+  '.password-store',
+  '.ansible',
+  '.semgrep',
+  // Other agent CLIs' logins, and this server's older data directory.
+  '.codex',
+  '.gemini',
+  '.cursor',
+  '.claude-code-ui',
+  path.join('.config', 'Claude'),
+  path.join('.local', 'share', 'opencode'),
+  // Desktop keyring, browser profiles, mail and online accounts.
+  path.join('.local', 'share', 'keyrings'),
+  '.mozilla',
+  path.join('.config', 'evolution'),
+  path.join('.local', 'share', 'evolution'),
+  path.join('.config', 'protonmail'),
+  path.join('.local', 'share', 'protonmail'),
+  path.join('.config', 'goa-1.0'),
+  // Backup tooling: repository passwords, and data restored out of a backup.
+  path.join('.config', 'backrest'),
+  path.join('.local', 'share', 'backrest'),
+  'backrest-restore',
+  // Forge's own tool configs that hold keys or secrets.
+  path.join('.config', 'fleet-tunnel'),
+  path.join('.config', 'cloudcli-plugin-task-queue'),
+  // Shell history can hold a secret typed or pasted on a command line.
+  '.bash_history',
+  '.zsh_history',
 ];
 
 /**

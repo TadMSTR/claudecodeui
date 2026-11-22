@@ -101,11 +101,16 @@ test('the guard covers the tool credential stores, PM2 state and compose env fil
     const covered = [
       '.claude.json', '.pm2/dump.pm2', 'docker/stack/.env', '.netrc', '.git-credentials',
       '.npmrc', '.docker/config.json', '.aws/credentials', '.kube/config', '.config/gh/hosts.yml',
+      '.codex/auth.json', '.gemini/oauth_creds.json', '.local/share/opencode/auth.json',
+      '.claude-code-ui/auth.db', '.password-store/x.gpg', '.mozilla/firefox/profile/logins.json',
+      '.local/share/keyrings/login.keyring', '.config/backrest/config.json', 'backrest-restore/x',
+      '.bash_history', '.config/Claude/config.json', '.config/fleet-tunnel/key',
     ];
     for (const entry of covered) {
       assert.equal(await isSecretPath(path.join(home, entry)), true, entry);
     }
-    for (const entry of ['.config/other/settings.json', 'dockerfiles/Dockerfile', 'repo/.claude.json', 'x.claude.json']) {
+    for (const entry of ['.config/other/settings.json', 'dockerfiles/Dockerfile', 'repo/.claude.json', 'x.claude.json',
+      '.local/share/applications/x.desktop', '.config/htop/htoprc', '.bashrc']) {
       assert.equal(await isSecretPath(path.join(home, entry)), false, entry);
     }
   });
