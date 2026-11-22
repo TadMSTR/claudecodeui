@@ -22,6 +22,20 @@ const SECRET_HOME_PATHS = [
   // This server's database, which holds the JWT signing secret.
   '.cloudcli',
   path.join('.claude', '.credentials.json'),
+  // MCP server entries here can carry bearer tokens in their headers.
+  '.claude.json',
+  // PM2's saved process list records each process's environment.
+  '.pm2',
+  // Compose stacks, each with its service secrets in an env file.
+  'docker',
+  // Tool credential stores.
+  '.netrc',
+  '.git-credentials',
+  '.npmrc',
+  '.docker',
+  '.aws',
+  '.kube',
+  path.join('.config', 'gh'),
 ];
 
 /** The protected paths for a home directory, absolute. Read per call so `HOME` changes are honoured. */

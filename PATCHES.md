@@ -478,9 +478,10 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
 ## viewer-secret-paths
 
 - **status:** fork-only (new at the v1.37.9 sync)
-- **commits:** **`57734c48`** (2026-11-22)
+- **commits:** **`57734c48`** (2026-11-22), and the pre-audit extension of the protected
+  list (2026-11-22, commit that follows `e259c3c0`)
 - **upstream-pr:** none. An upstream PR would need to drop the forge paths (`.secrets`,
-  `.claude-secrets`) and ask Ted first.
+  `.claude-secrets`, `docker`, `.pm2`) and ask Ted first.
 - **files:** `server/shared/secret-path-guard.ts` (new),
   `server/modules/file-tree/file-tree.service.ts`,
   `server/modules/file-tree/tests/file-tree-secret-paths.test.ts` (new), `.oxlintrc.json`
@@ -491,9 +492,16 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   `~/.ssh` files (including the private key) in full to any authenticated session. Ted chose
   a fork patch over a `WORKSPACES_ROOT` config change on 2026-11-22: it protects every
   workspace and does not depend on the launcher's env.
-- **what it does:** `isSecretPath()` treats `~/.ssh`, `~/.gnupg`, `~/.secrets`,
-  `~/.claude-secrets`, `~/.cloudcli` (this server's DB, which holds the JWT signing
-  secret) and `~/.claude/.credentials.json` as protected. It compares the path as written
+- **what it does:** `isSecretPath()` treats these as protected: `~/.ssh`, `~/.gnupg`,
+  `~/.secrets`, `~/.claude-secrets`, `~/.cloudcli` (this server's DB, which holds the JWT
+  signing secret), `~/.claude/.credentials.json`, `~/.claude.json` (MCP entries can carry
+  bearer headers), `~/.pm2` (the saved process list records each process's env),
+  `~/docker` (every compose stack's env file), and the tool credential stores `~/.netrc`,
+  `~/.git-credentials`, `~/.npmrc`, `~/.docker`, `~/.aws`, `~/.kube` and `~/.config/gh`.
+  The pre-audit added everything from `~/.claude.json` on: the first list left the compose
+  env files and PM2's env dump readable. **The list is a deny-list**, so a credential store
+  it doesn't name stays readable; anyone signed in also has CloudCLI's own terminal, so
+  this is defence in depth, not the boundary. It compares the path as written
   and with symlinks resolved, on both the target and the root. A path that does not exist
   yet is resolved through its nearest existing ancestor. The file-tree service calls it
   (`refuseSecretPath`, 403 `SECRET_PATH`) after its own resolution on **every** path:
@@ -533,16 +541,19 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
     an ordinary file under home, a file under /tmp                           -> 200, full size
     /etc/hostname                                                            -> 403 (outside root)
   ```
-- **tests:** 10 in `file-tree-secret-paths.test.ts`, over a scratch home with the real
+- **tests:** 12 in `file-tree-secret-paths.test.ts`, over a scratch home with the real
   filesystem adapter: each protected path and its contents; a prefix sibling (`.sshfoo`)
   and `~/.claude/settings.json` stay allowed; a project symlink into `~/.ssh`, including a
   not-yet-created target; a protected directory that is itself a symlink; `HOME` read at
   call time; workspace-root reads, project-relative reads through a symlink, and a
   home-rooted project's read, save, create, delete and rename (files on disk checked
-  unchanged); rename *to* `.secrets`; the browser. Mutations, both red: the guard disabled
+  unchanged); rename *to* `.secrets`; the browser; the added stores (each covered, and `.config/other`,
+  `dockerfiles` and `.claude.json.example` not) and a `~/docker/<stack>/.env` read refused.
+  With the list as `57734c48` had it, those two fail. Mutations, both red: the guard disabled
   in `refuseSecretPath` → 5 of 10 fail; symlink resolution of the target dropped → 2 fail
   (the two symlink tests). The existing file-tree service and route suites pass unchanged.
-- **last-verified:** `v1.37.9` on 2026-11-22. Probe 1 / 0 with controls; tests 10/10 and
+- **last-verified:** `v1.37.9` on 2026-11-22. Probe 1 / 0 with controls; tests 12/12 (10/10
+  before the extension) and
   red under both mutations; runtime probe as above (all four secret targets 200 → 403, both
   controls still 200); typecheck 0 errors; lint 0 errors, 147 warnings (unchanged).
 

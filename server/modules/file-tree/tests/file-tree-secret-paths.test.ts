@@ -96,6 +96,29 @@ test('the guard covers each credential path and its contents, not a sibling shar
   });
 });
 
+test('the guard covers the tool credential stores, PM2 state and compose env files', async () => {
+  await withHome(async ({ home }) => {
+    const covered = [
+      '.claude.json', '.pm2/dump.pm2', 'docker/stack/.env', '.netrc', '.git-credentials',
+      '.npmrc', '.docker/config.json', '.aws/credentials', '.kube/config', '.config/gh/hosts.yml',
+    ];
+    for (const entry of covered) {
+      assert.equal(await isSecretPath(path.join(home, entry)), true, entry);
+    }
+    for (const entry of ['.config/other/settings.json', 'dockerfiles/Dockerfile', '.claude.json.example']) {
+      assert.equal(await isSecretPath(path.join(home, entry)), false, entry);
+    }
+  });
+});
+
+test('a compose env file is refused through the workspace-root read', async () => {
+  await withHome(async ({ home, service }) => {
+    await fsPromises.mkdir(path.join(home, 'docker', 'stack'), { recursive: true });
+    await fsPromises.writeFile(path.join(home, 'docker', 'stack', '.env'), 'SYNTHETIC=1');
+    await assertSecretRefusal(service.readTextFile('app', path.join(home, 'docker', 'stack', '.env')));
+  });
+});
+
 test('the guard follows a symlink into a credential directory, and one that does not exist yet', async () => {
   await withHome(async ({ home, project }) => {
     assert.equal(await isSecretPath(path.join(project, 'keys', 'id_test')), true);
