@@ -65,7 +65,7 @@ const CLI_UPDATERS: Partial<Record<LLMProvider, CliUpdater>> = {
   },
 };
 
-/** Why the settings page offers no update: the CLI ships with CloudCLI, or the hosting platform manages the CLIs. */
+/** Why the settings page offers no update: the CLI ships with CloudCLI, the hosting platform manages the CLIs, or updates from the UI are off (fork patch `ui-updaters-off`, CLOUDCLI_ALLOW_UI_UPDATE). */
 type CliUpdateUnavailableReason = 'bundled' | 'platform' | 'disabled';
 
 /** Why an update run went wrong, as read from its exit code and output. */

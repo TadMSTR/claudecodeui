@@ -158,7 +158,9 @@ server/**/tests/file-tree-outside-*/
 
 # Core dumps — the server process holds CLAUDE_CODE_OAUTH_TOKEN and MCP bearer
 # tokens in memory, so a dump committed by accident leaks them wholesale.
-# Anchored with a numeric suffix, so a source file such as server/core.ts is not ignored.
+# The numeric suffix keeps source files such as server/core.ts out; core.[0-9]* is
+# left unanchored so a dump written from a subdirectory is caught too. A bare `core`
+# is anchored, because unanchored it would also ignore any directory named core/.
 /core
-/core.[0-9]*
+core.[0-9]*
 *.core
