@@ -14,7 +14,7 @@ import {
 // Synthetic fixture only — a 64-hex-shaped value with digits so it exercises
 // the same detection path as a real scoped-mcp bearer token. NOT a real secret.
 // Built at runtime so secret scanners do not trip on a literal (audit F-11).
-const SYNTHETIC_TOKEN = '0123456789abcdef'.repeat(4);
+const SYNTHETIC_TOKEN = Array.from({ length: 64 }, (_, index) => (index % 16).toString(16)).join('');
 // Synthetic URL-userinfo password, built at runtime for the same reason.
 const SYNTHETIC_PASSWORD = ['s3cr3t', 'pass'].join('');
 
