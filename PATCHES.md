@@ -49,11 +49,12 @@ worktrees:
 
 | | clean `v1.37.9` | fork (final, with `viewer-secret-paths`) |
 |---|---|---|
-| server (`npm test`) | 1061 tests, 1060 pass, 1 skip (2 of 3 runs; the third had one load flake) | 1127 tests, 1124 pass, 1 fail, 1 skip |
-| client (`npm run test:client`) | 159 files, 1176 pass | 159 files, 1177 pass |
+| server (`npm test`) | 1061 tests, 1060 pass, 1 skip (2 of 3 runs; the third had one load flake) | 1144 tests, 1142 pass, 2 skip (after the audit remediation; `agent.routes.test.ts` counted from its solo run, see below) |
+| client (`npm run test:client`) | 159 files, 1176 pass | 159 files, 1178 pass |
 | `npm run lint` | — | exit 0, 0 errors, 147 warnings |
 
-The fork's +66 server tests are its own. Every full-suite failure seen on the fork across
+The fork's +83 server tests are its own (10 of them from the audit remediation). The second skip is the busy-check route test, which `ui-updaters-off` skips
+unless `CLOUDCLI_ALLOW_UI_UPDATE=1`; it passes with it set. Every full-suite failure seen on the fork across
 four runs is a load-sensitive upstream test that passes alone, in a file no fork commit
 changes:
 - `agent.routes.test.ts`, failing at file level with `Unable to deserialize cloned data`:
@@ -67,7 +68,8 @@ changes:
 both the fork and clean `v1.37.9`. The package set is the same and `package-lock.json` is
 byte-identical, so the fork adds no dependency and no advisory. Production only
 (`--omit=dev`): 54 (1 critical, `proxy-addr`; 28 high). The 1.37.0 baseline (2026-08-01) was
-34 (0 critical, 17 high, 17 moderate).
+34 (0 critical, 17 high, 17 moderate). Reachability of the critical and the highs is not
+triaged yet: vikunja#1582.
 
 **Upstream changes with a security bearing, measured at this sync.** Ted decides; recorded
 here so the next sync knows the state.
@@ -95,7 +97,9 @@ here so the next sync knows the state.
   on a self-hosted install. It bypasses `sysadmin-claude-code-update`. Separately,
   `POST /api/system/update` (present since before `v1.37.4`) runs `npm install -g
   @cloudcli-ai/cloudcli@latest`, which would replace this fork's `npm link` with the
-  unpatched registry build. **Do not use either from the UI.**
+  unpatched registry build. **Status: fixed by a new fork patch, `ui-updaters-off`**
+  (security audit F-01, Medium, 2026-11-22): both routes return 403 unless the server's
+  environment sets `CLOUDCLI_ALLOW_UI_UPDATE=1`, and forge does not set it.
 - PR #1725 (1.37.8) and PR #1766 (1.37.9): MCP elicitation forms are shown rather than
   auto-declined, and `POST /api/agent` can pass `unattended: false` to keep them open.
   PR #1714 (1.37.8): an opt-in outbound webhook channel, left unconfigured (#1471).
@@ -114,7 +118,7 @@ for REF in v1.37.9 forge-local; do echo "== $REF"; <probe>; echo "exit $?"; done
 ```
 
 On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` against
-`sync/v1.37.9`. Every Retired probe, `background-send-dialog` included, reads `0` against
+`sync/v1.37.9`. The ninth, `ui-updaters-off`, was added after the audit and reads the same. Every Retired probe, `background-send-dialog` included, reads `0` against
 `v1.37.9`, so nothing upstream absorbed has regressed.
 
 ---
@@ -277,8 +281,11 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   `env:CLOUDCLI_ORIGIN` alongside it. The existing tests pick the allowlist entry to
   exercise via `[...PLUGIN_ENV_ALLOWLIST][0]` rather than by literal, so they cover the
   widened set without edit.
-- **last-verified:** `v1.37.9` on 2026-11-22. Static probe 1 / 0; unit probe 9/9 and
-  plugin-registry 6/6. Upstream changed `server/modules/plugins/` between `v1.37.4` and
+- **2026-11-22 (audit F-08):** a declared, allowlisted var that is not set in the host env
+  now logs `declared env "<NAME>" but it is not set in the host environment`, by name only.
+  Before, the plugin's calls failed later with nothing naming the cause.
+- **last-verified:** `v1.37.9` on 2026-11-22. Static probe 1 / 0; unit probe 10/10 (after
+  F-08) and plugin-registry 6/6. Upstream changed `server/modules/plugins/` between `v1.37.4` and
   `v1.37.9` (a new `plugin-git.service.ts`, and small edits to `plugin-registry.service.ts`
   and `plugins.service.ts`), but the fork's commit cherry-picked without conflict. The
   startup-log signal (`granted env passthrough:` for task-queue) is deploy row 6.
@@ -474,6 +481,43 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   to `v1.37.4`, so the negative and layer controls carry over.
 - **previously verified:** `v1.37.4` on 2026-10-15 (runtime probe passed, ordering confirmed).
 ---
+
+## ui-updaters-off
+
+- **status:** fork-only (new after the v1.37.9 sync's security audit, F-01)
+- **commits:** **`38ebdf5c`** (2026-11-22), plus the route test that follows it
+- **upstream-pr:** none. Upstream's only gate is hosted mode (`IS_PLATFORM`). An opt-in
+  env var could go upstream, but ask Ted first.
+- **files:** `server/shared/utils.ts` (`UI_UPDATE_ALLOWED`, `UI_UPDATE_DISABLED_MESSAGE`),
+  `server/modules/providers/services/provider-cli.service.ts`,
+  `server/modules/system/system.service.ts`, `system.routes.ts`, `system.module.ts`,
+  `src/shared/types.ts`, `src/modules/settings/.../ProviderCliVersion.tsx`,
+  `src/modules/i18n/locales/en/settings.json`, and tests:
+  `provider-cli.service.test.ts`, `provider.routes.test.ts`, `system.service.test.ts`,
+  `system.routes.test.ts` (new), `providerCliVersion.test.tsx`
+- **why:** PR #1609 (1.37.6) added a Settings button that runs a provider CLI's own updater
+  (`claude update`), outside `sysadmin-claude-code-update`. `POST /api/system/update` runs
+  `npm install -g @cloudcli-ai/cloudcli@latest`, which replaces this fork's `npm link`
+  and every patch in this file with the unaudited registry build. Neither had an off switch
+  on a self-hosted install, and the only control was a sentence here.
+- **what it does:** both routes refuse unless `CLOUDCLI_ALLOW_UI_UPDATE=1` is in the
+  server's environment, read once at start. The CLI route throws 403
+  `PROVIDER_CLI_UPDATE_DISABLED` before resolving the provider; the system route returns 403
+  with `disabled: true` and runs nothing. `GET /api/providers/:provider/cli` reports
+  `updateUnavailableReason: 'disabled'` and `updateCommand: null`, so Settings shows
+  "Updates from the UI are turned off on this server." and no button. The
+  version-upgrade modal still has its button; pressing it shows the 403 message.
+- **probe:**
+  ```
+  # exits 0 if upstream has its own off switch for the UI updaters; 2 if an anchor file is gone
+  probe() { git cat-file -e "$1:server/modules/providers/services/provider-cli.service.ts" \
+      && git cat-file -e "$1:server/modules/system/system.service.ts" || return 2
+    git grep -qiE 'ALLOW_UI_UPDATE|uiUpdateAllowed|disableUiUpdate|UPDATE_DISABLED' "$1" -- \
+      server/modules/providers/services/provider-cli.service.ts server/modules/system/system.service.ts; }
+  # 2026-11-22: v1.37.9 -> exit 1, sync/v1.37.9 -> exit 0. Discriminates.
+  ```
+- **last-verified:** `v1.37.9` on 2026-11-22. Each refusal was removed in turn and its test
+  went red (updateCli guard, status reason, system guard, route 403).
 
 ## viewer-secret-paths
 
