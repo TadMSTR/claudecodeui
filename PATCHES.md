@@ -31,7 +31,8 @@ order:
 1. the two build-script commits;
 2. the argv guard, its hunks hand-ported into the `.ts` provider;
 3. core dumps, baseline, plugin env, WS origin, the two allowedTools value-shape commits;
-4. the three held-run commits, with conflicts resolved by hand and the held-run helpers typed.
+4. the three held-run commits, with conflicts resolved by hand and the held-run helpers typed;
+5. one new patch, `viewer-secret-paths`, written at this sync for upstream PR #1622.
 
 Dropped: `7ff426ab` and every `PATCHES.md`-only commit (this file was rewritten instead).
 `git log --oneline v1.37.9..forge-local` shows only fork commits.
@@ -46,17 +47,21 @@ move, so no `npm link` is needed. **The SDK pin moved `^0.3.165` → `^0.3.311`*
 the argv guard's re-open trigger (see its entry). Test counts on 2026-11-22, in the same
 worktrees:
 
-| | clean `v1.37.9` | fork |
+| | clean `v1.37.9` | fork (final, with `viewer-secret-paths`) |
 |---|---|---|
-| server (`npm test`) | 1061 tests, 1060 pass, 0 fail, 1 skip | 1109 tests, 1107 pass, 1 fail, 1 skip |
+| server (`npm test`) | 1061 tests, 1060 pass, 1 skip (2 of 3 runs; the third had one load flake) | 1127 tests, 1124 pass, 1 fail, 1 skip |
 | client (`npm run test:client`) | 159 files, 1176 pass | 159 files, 1177 pass |
 | `npm run lint` | — | exit 0, 0 errors, 147 warnings |
 
-The one server failure is `agent.routes.test.ts` failing at file level with `Unable to
-deserialize cloned data`. That is the upstream runner flake #306 (see Retired
-`test-alias-resolution`); it passes alone. A first full run also timed out
-`chat-side-question` and miscounted one webhook in-flight-cap test. Both pass alone and on
-the second full run, and neither touches a fork file.
+The fork's +66 server tests are its own. Every full-suite failure seen on the fork across
+four runs is a load-sensitive upstream test that passes alone, in a file no fork commit
+changes:
+- `agent.routes.test.ts`, failing at file level with `Unable to deserialize cloned data`:
+  the runner flake #306 (see Retired `test-alias-resolution`).
+- `chat-side-question.test.ts`: two subtests time out or assert after a fixed 30 ms
+  `settle()`. They run against a fake runtime and pass 5/5 alone. Clean `v1.37.9` showed the
+  same class: its second full run had a `not ok` in the side-questions history route test.
+- one webhook in-flight-cap count, once.
 
 **`npm audit` (2026-11-22):** 80 advisories (9 critical, 37 high, 28 moderate, 6 low) on
 both the fork and clean `v1.37.9`. The package set is the same and `package-lock.json` is
@@ -79,8 +84,10 @@ here so the next sync knows the state.
   - Also by design: the read-only roots (`READ_ONLY_ROOTS`) make all of `/tmp` and
     `~/.claude/projects` readable.
 
-  The live service before this sync (`v1.37.4`) predates PR #1622. **Status: found at
-  build, deploy held for Ted's decision** (see the build's handoff).
+  The live service before this sync (`v1.37.4`) predates PR #1622. **Status: fixed by a
+  new fork patch, `viewer-secret-paths`** (Ted's decision, 2026-11-22). The same probe
+  against the patched build gives 403 for all four secret files and still 200 for
+  ordinary files under home and `/tmp`.
 - **PR #1609 (1.37.6): Settings can update a provider CLI.**
   `POST /api/providers/:provider/cli/update` runs `providerCliService.updateCli`
   (`server/modules/providers/services/provider-cli.service.ts`), e.g. `claude update`. The
@@ -106,7 +113,7 @@ the patch is broken, not a result:
 for REF in v1.37.9 forge-local; do echo "== $REF"; <probe>; echo "exit $?"; done
 ```
 
-On 2026-11-22 all **seven** live probes read `1` against `v1.37.9` and `0` against
+On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` against
 `sync/v1.37.9`. Every Retired probe, `background-send-dialog` included, reads `0` against
 `v1.37.9`, so nothing upstream absorbed has regressed.
 
@@ -467,6 +474,77 @@ On 2026-11-22 all **seven** live probes read `1` against `v1.37.9` and `0` again
   to `v1.37.4`, so the negative and layer controls carry over.
 - **previously verified:** `v1.37.4` on 2026-10-15 (runtime probe passed, ordering confirmed).
 ---
+
+## viewer-secret-paths
+
+- **status:** fork-only (new at the v1.37.9 sync)
+- **commits:** **`57734c48`** (2026-11-22)
+- **upstream-pr:** none. An upstream PR would need to drop the forge paths (`.secrets`,
+  `.claude-secrets`) and ask Ted first.
+- **files:** `server/shared/secret-path-guard.ts` (new),
+  `server/modules/file-tree/file-tree.service.ts`,
+  `server/modules/file-tree/tests/file-tree-secret-paths.test.ts` (new), `.oxlintrc.json`
+  (registers the guard in `backend-shared-utils`, next to `argv-secret-guard.js`)
+- **why:** upstream PR #1622 (1.37.6) lets the file viewer read any absolute path under
+  `WORKSPACES_ROOT`, which defaults to the home directory, and forge does not set it.
+  Measured at this sync over HTTP, the viewer returned `~/.secrets`, `~/.claude-secrets` and
+  `~/.ssh` files (including the private key) in full to any authenticated session. Ted chose
+  a fork patch over a `WORKSPACES_ROOT` config change on 2026-11-22: it protects every
+  workspace and does not depend on the launcher's env.
+- **what it does:** `isSecretPath()` treats `~/.ssh`, `~/.gnupg`, `~/.secrets`,
+  `~/.claude-secrets`, `~/.cloudcli` (this server's DB, which holds the JWT signing
+  secret) and `~/.claude/.credentials.json` as protected. It compares the path as written
+  and with symlinks resolved, on both the target and the root. A path that does not exist
+  yet is resolved through its nearest existing ancestor. The file-tree service calls it
+  (`refuseSecretPath`, 403 `SECRET_PATH`) after its own resolution on **every** path:
+  - reads (`resolveReadablePath`: the read-only-root, workspace-root and project branches);
+  - the folder browser and `createWorkspaceFolder`;
+  - every write through `resolveWritablePath`: save, create, rename (both ends), delete and
+    each upload destination. A project rooted at home cannot plant `~/.ssh/authorized_keys`.
+
+  The roots are read from `os.homedir()` per call. **Not covered:** the project file tree
+  listing still shows the *names* of entries inside a protected directory when a project
+  is rooted at home; contents are refused.
+- **probe:** three-state:
+  ```
+  f=server/modules/file-tree/file-tree.service.ts
+  git show <ref>:$f 2>/dev/null | python3 -c "
+  import re,sys
+  s=sys.stdin.read()
+  i=s.find('async function resolveReadablePath(')
+  if not s or i<0: sys.exit(2)          # anchor gone: probe broken, NOT covered
+  j=s.find('\n  }\n', i)
+  if j<0: sys.exit(2)
+  body=s[i:j]
+  sys.exit(0 if re.search(r'secret|\.ssh|credential|deny|protected', body, re.I) else 1)"
+  ```
+  2026-11-22: `v1.37.9` → **1**, `sync/v1.37.9` → **0**. Negative controls: the three
+  `refuseSecretPath` calls in `resolveReadablePath` removed → **1**; the function renamed →
+  **2**. A match for `'.ssh'` across `server/` is **not** a usable probe: upstream's own
+  `image-attachments.test.ts` already contains one. **This probe only reads the resolver's
+  body.** If upstream adds its own protection elsewhere (in `resolvePathUnderRoots`, say),
+  expect 1, and read the code before retiring.
+
+  Runtime (authoritative): the viewer probe, against a loopback scratch server built from
+  the branch, with `WORKSPACES_ROOT` unset. Status and byte count only:
+  ```
+  GET /api/file-tree/projects/<id>/file?filePath=<abs>          (and /files/content?path=<abs>)
+    ~/.secrets/<f>, ~/.claude-secrets/<f>, ~/.ssh/config, ~/.ssh/id_ed25519  -> 403
+    an ordinary file under home, a file under /tmp                           -> 200, full size
+    /etc/hostname                                                            -> 403 (outside root)
+  ```
+- **tests:** 10 in `file-tree-secret-paths.test.ts`, over a scratch home with the real
+  filesystem adapter: each protected path and its contents; a prefix sibling (`.sshfoo`)
+  and `~/.claude/settings.json` stay allowed; a project symlink into `~/.ssh`, including a
+  not-yet-created target; a protected directory that is itself a symlink; `HOME` read at
+  call time; workspace-root reads, project-relative reads through a symlink, and a
+  home-rooted project's read, save, create, delete and rename (files on disk checked
+  unchanged); rename *to* `.secrets`; the browser. Mutations, both red: the guard disabled
+  in `refuseSecretPath` → 5 of 10 fail; symlink resolution of the target dropped → 2 fail
+  (the two symlink tests). The existing file-tree service and route suites pass unchanged.
+- **last-verified:** `v1.37.9` on 2026-11-22. Probe 1 / 0 with controls; tests 10/10 and
+  red under both mutations; runtime probe as above (all four secret targets 200 → 403, both
+  controls still 200); typecheck 0 errors; lint 0 errors, 147 warnings (unchanged).
 
 ## held-run-relay-turn
 
