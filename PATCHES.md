@@ -494,8 +494,9 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
   workspace and does not depend on the launcher's env.
 - **what it does:** `isSecretPath()` treats these as protected: `~/.ssh`, `~/.gnupg`,
   `~/.secrets`, `~/.claude-secrets`, `~/.cloudcli` (this server's DB, which holds the JWT
-  signing secret), `~/.claude/.credentials.json`, `~/.claude.json` (MCP entries can carry
-  bearer headers), `~/.pm2` (the saved process list records each process's env),
+  signing secret), `~/.claude/.credentials.json`, every home entry whose name starts with
+  `.claude.json` (MCP entries can carry bearer headers, and its `.bak-*` copies hold the
+  same), `~/.pm2` (the saved process list records each process's env),
   `~/docker` (every compose stack's env file), and the tool credential stores `~/.netrc`,
   `~/.git-credentials`, `~/.npmrc`, `~/.docker`, `~/.aws`, `~/.kube` and `~/.config/gh`.
   The pre-audit added everything from `~/.claude.json` on: the first list left the compose
@@ -541,18 +542,20 @@ On 2026-11-22 all **eight** live probes read `1` against `v1.37.9` and `0` again
     an ordinary file under home, a file under /tmp                           -> 200, full size
     /etc/hostname                                                            -> 403 (outside root)
   ```
-- **tests:** 12 in `file-tree-secret-paths.test.ts`, over a scratch home with the real
+- **tests:** 13 in `file-tree-secret-paths.test.ts`, over a scratch home with the real
   filesystem adapter: each protected path and its contents; a prefix sibling (`.sshfoo`)
   and `~/.claude/settings.json` stay allowed; a project symlink into `~/.ssh`, including a
   not-yet-created target; a protected directory that is itself a symlink; `HOME` read at
   call time; workspace-root reads, project-relative reads through a symlink, and a
   home-rooted project's read, save, create, delete and rename (files on disk checked
   unchanged); rename *to* `.secrets`; the browser; the added stores (each covered, and `.config/other`,
-  `dockerfiles` and `.claude.json.example` not) and a `~/docker/<stack>/.env` read refused.
-  With the list as `57734c48` had it, those two fail. Mutations, both red: the guard disabled
+  `dockerfiles` `repo/.claude.json` and `x.claude.json` not), a `~/docker/<stack>/.env` read refused, and
+  `~/.claude.json` backups refused directly and through a project symlink. With the list as
+  `57734c48` had it, those three fail; with an exact `.claude.json` match, the backup test
+  fails. Mutations, both red: the guard disabled
   in `refuseSecretPath` → 5 of 10 fail; symlink resolution of the target dropped → 2 fail
   (the two symlink tests). The existing file-tree service and route suites pass unchanged.
-- **last-verified:** `v1.37.9` on 2026-11-22. Probe 1 / 0 with controls; tests 12/12 (10/10
+- **last-verified:** `v1.37.9` on 2026-11-22. Probe 1 / 0 with controls; tests 13/13 (10/10
   before the extension) and
   red under both mutations; runtime probe as above (all four secret targets 200 → 403, both
   controls still 200); typecheck 0 errors; lint 0 errors, 147 warnings (unchanged).

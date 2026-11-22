@@ -22,8 +22,6 @@ const SECRET_HOME_PATHS = [
   // This server's database, which holds the JWT signing secret.
   '.cloudcli',
   path.join('.claude', '.credentials.json'),
-  // MCP server entries here can carry bearer tokens in their headers.
-  '.claude.json',
   // PM2's saved process list records each process's environment.
   '.pm2',
   // Compose stacks, each with its service secrets in an env file.
@@ -38,9 +36,27 @@ const SECRET_HOME_PATHS = [
   path.join('.config', 'gh'),
 ];
 
+/**
+ * Names in the home directory protected by prefix, for files whose backups sit
+ * beside them under suffixed names. `.claude.json` holds MCP server entries,
+ * which can carry bearer tokens in their headers, and so does every
+ * `.claude.json.bak-*` copy of it.
+ */
+const SECRET_HOME_NAME_PREFIXES = ['.claude.json'];
+
 /** The protected paths for a home directory, absolute. Read per call so `HOME` changes are honoured. */
 export function secretPathRoots(homeDirectory: string = os.homedir()): string[] {
   return SECRET_HOME_PATHS.map((entry) => path.join(homeDirectory, entry));
+}
+
+/** Whether `target` is a home-directory entry named with a protected prefix, or inside one. */
+function hasSecretHomePrefix(target: string, homeDirectory: string): boolean {
+  const relative = path.relative(homeDirectory, target);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return false;
+  }
+  const first = relative.split(path.sep)[0];
+  return SECRET_HOME_NAME_PREFIXES.some((prefix) => first.startsWith(prefix));
 }
 
 function isUnder(candidate: string, root: string): boolean {
@@ -73,9 +89,20 @@ async function resolveExisting(candidate: string): Promise<string> {
  * and with symlinks resolved on both sides, so neither a link to a protected
  * directory nor a protected directory that is itself a link gets past it.
  */
-export async function isSecretPath(candidate: string, roots: string[] = secretPathRoots()): Promise<boolean> {
+export async function isSecretPath(
+  candidate: string,
+  roots: string[] = secretPathRoots(),
+  homeDirectory: string = os.homedir(),
+): Promise<boolean> {
   const lexical = path.resolve(candidate);
   const resolved = await resolveExisting(lexical);
+  const home = path.resolve(homeDirectory);
+  const resolvedHome = await resolveExisting(home);
+  for (const target of [lexical, resolved]) {
+    if (hasSecretHomePrefix(target, home) || hasSecretHomePrefix(target, resolvedHome)) {
+      return true;
+    }
+  }
   for (const root of roots) {
     const resolvedRoot = await resolveExisting(path.resolve(root));
     for (const target of [lexical, resolved]) {

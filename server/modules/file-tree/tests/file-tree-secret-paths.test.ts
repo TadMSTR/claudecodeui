@@ -105,9 +105,21 @@ test('the guard covers the tool credential stores, PM2 state and compose env fil
     for (const entry of covered) {
       assert.equal(await isSecretPath(path.join(home, entry)), true, entry);
     }
-    for (const entry of ['.config/other/settings.json', 'dockerfiles/Dockerfile', '.claude.json.example']) {
+    for (const entry of ['.config/other/settings.json', 'dockerfiles/Dockerfile', 'repo/.claude.json', 'x.claude.json']) {
       assert.equal(await isSecretPath(path.join(home, entry)), false, entry);
     }
+  });
+});
+
+test('the guard covers every backup copy of ~/.claude.json, directly and through a symlink', async () => {
+  await withHome(async ({ home, project, service }) => {
+    for (const entry of ['.claude.json.bak-20260101-120000', '.claude.json.rolledback-1', '.claude.json.backup']) {
+      assert.equal(await isSecretPath(path.join(home, entry)), true, entry);
+    }
+    await fsPromises.writeFile(path.join(home, '.claude.json.bak-1'), '{}');
+    await fsPromises.symlink(path.join(home, '.claude.json.bak-1'), path.join(project, 'cfg.json'));
+    assert.equal(await isSecretPath(path.join(project, 'cfg.json')), true);
+    await assertSecretRefusal(service.readTextFile('app', path.join(home, '.claude.json.bak-1')));
   });
 });
 
