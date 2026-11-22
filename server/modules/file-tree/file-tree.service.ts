@@ -15,6 +15,7 @@ import {
   normalizeProjectPath,
   resolvePathUnderRoots,
 } from '@/shared/utils.js';
+import { isSecretPath } from '@/shared/secret-path-guard.js';
 
 const HARD_EXCLUDED_DIRECTORY_NAMES = new Set([
   'node_modules', '.git', '.svn', '.hg',
@@ -56,6 +57,24 @@ function includeEntryByFallbackDirectoryNames(entryPath: string, isDirectory: bo
 
 function createFileTreeError(message: string, statusCode: number, code: string): AppError {
   return new AppError(message, { statusCode, code });
+}
+
+/**
+ * Forge fork (viewer-secret-paths): refuses a resolved path inside a protected
+ * credentials directory (see shared/secret-path-guard). Every read, browse and
+ * write below goes through it after its own resolution, so no root policy —
+ * workspace, read-only or project — can reach one.
+ */
+async function refuseSecretPath(resolvedPath: string): Promise<string> {
+  if (await isSecretPath(resolvedPath)) {
+    throw createFileTreeError('Path is inside a protected credentials directory', 403, 'SECRET_PATH');
+  }
+  return resolvedPath;
+}
+
+/** `resolvePathInsideProject` for the writing endpoints, plus the protected-path refusal. */
+async function resolveWritablePath(projectRoot: string, targetPath: string): Promise<string> {
+  return refuseSecretPath(resolvePathInsideProject(projectRoot, targetPath));
 }
 
 function readErrorCode(error: unknown): string | null {
@@ -329,7 +348,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
   async function resolveBrowsablePath(targetPath: string): Promise<string> {
     const readOnlyPath = await dependencies.workspace.resolveReadOnlyRootPath(targetPath);
     if (readOnlyPath) {
-      return readOnlyPath;
+      return refuseSecretPath(readOnlyPath);
     }
 
     const validation = await dependencies.workspace.validatePath(targetPath);
@@ -337,7 +356,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       throw createFileTreeError(validation.error ?? 'Path is outside the workspace root', 403, 'INVALID_WORKSPACE_PATH');
     }
 
-    return validation.resolvedPath || targetPath;
+    return refuseSecretPath(validation.resolvedPath || targetPath);
   }
 
   /**
@@ -359,16 +378,16 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
     if (path.isAbsolute(targetPath)) {
       const readOnlyPath = await dependencies.workspace.resolveReadOnlyRootPath(targetPath);
       if (readOnlyPath) {
-        return readOnlyPath;
+        return refuseSecretPath(readOnlyPath);
       }
 
       const workspacePath = await resolvePathUnderRoots(targetPath, [dependencies.workspace.rootPath]);
       if (workspacePath) {
-        return workspacePath;
+        return refuseSecretPath(workspacePath);
       }
     }
 
-    return resolvePathInsideProject(projectRoot, targetPath);
+    return refuseSecretPath(resolvePathInsideProject(projectRoot, targetPath));
   }
 
   async function cleanupTemporaryFiles(files: FileTreeUploadedFile[]): Promise<void> {
@@ -437,7 +456,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
         throw createFileTreeError(validation.error ?? 'Path is outside the workspace root', 403, 'INVALID_WORKSPACE_PATH');
       }
 
-      const targetPath = validation.resolvedPath || resolvedInput;
+      const targetPath = await refuseSecretPath(validation.resolvedPath || resolvedInput);
       try {
         await fileSystem.access(path.dirname(targetPath));
       } catch {
@@ -494,7 +513,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
 
     async saveTextFile(projectId, filePath, content) {
       const projectRoot = await resolveProjectRoot(projectId);
-      const resolvedPath = resolvePathInsideProject(projectRoot, filePath);
+      const resolvedPath = await resolveWritablePath(projectRoot, filePath);
       try {
         await fileSystem.writeTextFile(resolvedPath, content);
       } catch (error) {
@@ -536,7 +555,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       const targetPath = input.parentPath
         ? path.join(input.parentPath, input.name)
         : input.name;
-      const resolvedPath = resolvePathInsideProject(projectRoot, targetPath);
+      const resolvedPath = await resolveWritablePath(projectRoot, targetPath);
 
       try {
         await fileSystem.access(resolvedPath);
@@ -580,7 +599,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
     async renameEntry(input) {
       validateFilename(input.newName);
       const projectRoot = await resolveProjectRoot(input.projectId);
-      const resolvedOldPath = resolvePathInsideProject(projectRoot, input.oldPath);
+      const resolvedOldPath = await resolveWritablePath(projectRoot, input.oldPath);
 
       try {
         await fileSystem.access(resolvedOldPath);
@@ -589,7 +608,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       }
 
       const resolvedNewPath = path.join(path.dirname(resolvedOldPath), input.newName);
-      resolvePathInsideProject(projectRoot, resolvedNewPath);
+      await resolveWritablePath(projectRoot, resolvedNewPath);
       try {
         await fileSystem.access(resolvedNewPath);
         throw createFileTreeError(
@@ -622,7 +641,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
 
     async deleteEntry(input) {
       const projectRoot = await resolveProjectRoot(input.projectId);
-      const resolvedPath = resolvePathInsideProject(projectRoot, input.targetPath);
+      const resolvedPath = await resolveWritablePath(projectRoot, input.targetPath);
       let stats;
       try {
         stats = await fileSystem.stat(resolvedPath);
@@ -668,7 +687,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
           || input.targetPath === '.'
           || input.targetPath === './'
           ? path.resolve(projectRoot)
-          : resolvePathInsideProject(projectRoot, input.targetPath);
+          : await resolveWritablePath(projectRoot, input.targetPath);
 
         try {
           await fileSystem.access(resolvedTargetDirectory);
@@ -683,7 +702,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
           const destinationPath = path.join(resolvedTargetDirectory, fileName);
 
           try {
-            resolvePathInsideProject(projectRoot, destinationPath);
+            await resolveWritablePath(projectRoot, destinationPath);
           } catch (error) {
             if (error instanceof AppError && error.statusCode === 403) {
               await cleanupTemporaryFiles([file]);
